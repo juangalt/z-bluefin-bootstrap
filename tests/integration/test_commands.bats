@@ -16,10 +16,11 @@ setup() {
   run bash "$BOOTSTRAP" help
   assert_success
   assert_output --partial "Bluefin laptop bootstrap"
-  assert_output --partial "github"
+  assert_output --partial "install github-key"
+  assert_output --partial "install dotfiles"
+  assert_output --partial "install packages"
+  assert_output --partial "install all"
   assert_output --partial "recovery-key"
-  assert_output --partial "dotfiles"
-  assert_output --partial "packages"
 }
 
 @test "--help: shows usage text" {
@@ -34,12 +35,26 @@ setup() {
   assert_output --partial "Unknown command: bogus"
 }
 
-# ── github ───────────────────────────────────────────────────────────────────
+# ── install ──────────────────────────────────────────────────────────────────
 
-@test "github: logs in and saves key" {
+@test "install: no subcommand shows usage" {
+  run bash "$BOOTSTRAP" install
+  assert_failure
+  assert_output --partial "Usage:"
+}
+
+@test "install: unknown subcommand shows usage" {
+  run bash "$BOOTSTRAP" install bogus
+  assert_failure
+  assert_output --partial "Usage:"
+}
+
+# ── install github-key ──────────────────────────────────────────────────────
+
+@test "install github-key: logs in and saves key" {
   mock_bw_status unauthenticated
   mock_jq_sequence "unauthenticated" "-----BEGIN OPENSSH PRIVATE KEY-----"
-  run bash "$BOOTSTRAP" github
+  run bash "$BOOTSTRAP" install github-key
   assert_success
   assert_output --partial "BW_SESSION exported"
   assert_output --partial "GitHub SSH key saved"
@@ -85,9 +100,9 @@ setup() {
   refute_output --partial "Recovery SSH Key"
 }
 
-# ── all ──────────────────────────────────────────────────────────────────────
+# ── install all ──────────────────────────────────────────────────────────────
 
-@test "all: runs login + github + dotfiles + packages" {
+@test "install all: runs login + github-key + dotfiles + packages" {
   mock_bw_status unauthenticated
   mock_jq_sequence "unauthenticated" "-----BEGIN OPENSSH PRIVATE KEY-----"
   mock_cmd git 0
@@ -95,7 +110,7 @@ setup() {
   mock_cmd brew 0
   mkdir -p "$HOME/z-bluefin-dotfiles"
   touch "$HOME/z-bluefin-dotfiles/Brewfile"
-  run bash "$BOOTSTRAP" all
+  run bash "$BOOTSTRAP" install all
   assert_success
   assert_output --partial "BW_SESSION exported"
   assert_output --partial "GitHub SSH key saved"
@@ -138,43 +153,42 @@ setup() {
   assert_output --partial "Hostname set to 'test-host'"
 }
 
-# ── packages ─────────────────────────────────────────────────────────────────
+# ── install packages ─────────────────────────────────────────────────────────
 
-@test "packages: fails when Brewfile missing" {
+@test "install packages: fails when Brewfile missing" {
   mock_cmd brew 0
-  run bash "$BOOTSTRAP" packages
+  run bash "$BOOTSTRAP" install packages
   assert_failure
   assert_output --partial "Brewfile not found"
 }
 
-@test "packages: installs from Brewfile" {
+@test "install packages: installs from Brewfile" {
   mock_cmd brew 0
   mkdir -p "$HOME/z-bluefin-dotfiles"
   touch "$HOME/z-bluefin-dotfiles/Brewfile"
-  run bash "$BOOTSTRAP" packages
+  run bash "$BOOTSTRAP" install packages
   assert_success
   assert_output --partial "All packages installed"
 }
 
-# ── dotfiles ─────────────────────────────────────────────────────────────────
+# ── install dotfiles ─────────────────────────────────────────────────────────
 
-@test "dotfiles: warns when github key missing" {
+@test "install dotfiles: warns when github key missing" {
   mock_cmd git 0
   mock_cmd chezmoi 0
-  run bash "$BOOTSTRAP" dotfiles
+  run bash "$BOOTSTRAP" install dotfiles
   assert_success
   assert_output --partial "GitHub SSH key not found"
   assert_output --partial "Dotfiles applied"
 }
 
-@test "dotfiles: clones and applies successfully" {
+@test "install dotfiles: clones and applies successfully" {
   mkdir -p "$HOME/.ssh"
   touch "$HOME/.ssh/github"
   mock_cmd git 0
   mock_cmd chezmoi 0
-  run bash "$BOOTSTRAP" dotfiles
+  run bash "$BOOTSTRAP" install dotfiles
   assert_success
   refute_output --partial "GitHub SSH key not found"
   assert_output --partial "Dotfiles applied"
 }
-

@@ -149,7 +149,7 @@ install_packages() {
   require brew
 
   local brewfile="$DOTFILES_DIR/Brewfile"
-  [[ -f "$brewfile" ]] || die "Brewfile not found at $brewfile — run 'dotfiles' first"
+  [[ -f "$brewfile" ]] || die "Brewfile not found at $brewfile — run 'install dotfiles' first"
 
   info "Installing packages from Brewfile (brew + flatpak)..."
   brew bundle install --file="$brewfile" --no-upgrade \
@@ -165,28 +165,28 @@ cmd_help() {
   echo -e "${BOLD}Usage:${RESET} z-bluefin-bootstrap.sh <command>"
   echo
   echo -e "${BOLD}Commands${RESET} ${DIM}(in typical setup order)${RESET}"
-  echo -e "  ${BOLD}status${RESET}              Show current state (SSH, dotfiles, chezmoi drift, brew)"
-  echo -e "  ${BOLD}set-hostname${RESET} <name> Set the system hostname via hostnamectl"
-  echo -e "  ${BOLD}github${RESET}              Save GitHub SSH key to ~/.ssh/github"
-  echo -e "  ${BOLD}dotfiles${RESET}            Clone z-bluefin-dotfiles and apply with chezmoi"
-  echo -e "  ${BOLD}packages${RESET}            Install brew packages and flatpaks from Brewfile"
-  echo -e "  ${BOLD}all${RESET}                 Run github + dotfiles + packages in one shot"
-  echo -e "  ${BOLD}recovery-key${RESET}        Load recovery SSH key into ssh-agent ${DIM}(optional, needs eval)${RESET}"
-  echo -e "  ${BOLD}help${RESET}                Show this help"
+  echo -e "  ${BOLD}status${RESET}                Show current state (SSH, dotfiles, chezmoi drift, brew)"
+  echo -e "  ${BOLD}set-hostname${RESET} <name>   Set the system hostname via hostnamectl"
+  echo -e "  ${BOLD}install github-key${RESET}    Save GitHub SSH key to ~/.ssh/github"
+  echo -e "  ${BOLD}install dotfiles${RESET}      Clone z-bluefin-dotfiles and apply with chezmoi"
+  echo -e "  ${BOLD}install packages${RESET}      Install brew packages and flatpaks from Brewfile"
+  echo -e "  ${BOLD}install all${RESET}           Run github-key + dotfiles + packages in one shot"
+  echo -e "  ${BOLD}recovery-key${RESET}          Load recovery SSH key into ssh-agent ${DIM}(needs eval, see below)${RESET}"
+  echo -e "  ${BOLD}help${RESET}                  Show this help"
   echo
   echo -e "Each command handles Bitwarden login/unlock automatically."
   echo
   echo -e "${BOLD}Quick start${RESET}"
   echo -e "  ./z-bluefin-bootstrap.sh status"
   echo -e "  ./z-bluefin-bootstrap.sh set-hostname my-laptop"
-  echo -e "  ./z-bluefin-bootstrap.sh github"
-  echo -e "  ./z-bluefin-bootstrap.sh dotfiles"
-  echo -e "  ./z-bluefin-bootstrap.sh packages"
+  echo -e "  ./z-bluefin-bootstrap.sh install github-key"
+  echo -e "  ./z-bluefin-bootstrap.sh install dotfiles"
+  echo -e "  ./z-bluefin-bootstrap.sh install packages"
   echo
   echo -e "  ${DIM}# Or all at once:${RESET}"
-  echo -e "  ./z-bluefin-bootstrap.sh all"
+  echo -e "  ./z-bluefin-bootstrap.sh install all"
   echo
-  echo -e "  ${DIM}# Optional — load recovery SSH key into agent:${RESET}"
+  echo -e "  ${DIM}# Load recovery SSH key into agent:${RESET}"
   echo -e "  eval \"\$(./z-bluefin-bootstrap.sh recovery-key)\""
   echo
   echo -e "${BOLD}Digging deeper${RESET}"
@@ -253,7 +253,7 @@ cmd_status() {
     if [[ "$drift" -eq 0 ]]; then
       ok "chezmoi: all managed files in sync"
     else
-      warn "chezmoi: ${drift} file(s) out of sync — run 'dotfiles' to re-apply"
+      warn "chezmoi: ${drift} file(s) out of sync — run 'install dotfiles' to re-apply"
     fi
   else
     warn "chezmoi not installed"
@@ -269,7 +269,7 @@ cmd_status() {
       else
         local missing
         missing=$(printf '%s\n' "$brew_output" | grep -c '^→' || true)
-        warn "Brewfile: ${missing} package(s) missing — run 'packages' to install"
+        warn "Brewfile: ${missing} package(s) missing — run 'install packages' to install"
       fi
     fi
   else
@@ -288,39 +288,53 @@ cmd_set_hostname() {
   ok "Hostname set to '${new_hostname}'"
 }
 
-cmd_github() {
+cmd_install_github_key() {
   bw_login_or_unlock
   header "GitHub SSH Key"
   save_github_key
 }
 
-cmd_dotfiles() {
+cmd_install_dotfiles() {
   if [[ ! -f "$HOME/.ssh/github" ]]; then
-    warn "GitHub SSH key not found — clone may fail. Run 'github' command first."
+    warn "GitHub SSH key not found — clone may fail. Run 'install github-key' first."
   fi
   header "Dotfiles"
   clone_and_apply_dotfiles
 }
 
-cmd_packages() {
+cmd_install_packages() {
   header "Packages"
   install_packages
+}
+
+cmd_install_all() {
+  bw_login_or_unlock
+  header "GitHub SSH Key"
+  save_github_key
+  header "Dotfiles"
+  clone_and_apply_dotfiles
+  header "Packages"
+  install_packages
+  echo
+  ok "Bootstrap complete."
+}
+
+cmd_install() {
+  local subcmd="${1:-}"
+  shift || true
+  case "$subcmd" in
+    github-key) cmd_install_github_key "$@" ;;
+    dotfiles)   cmd_install_dotfiles "$@" ;;
+    packages)   cmd_install_packages "$@" ;;
+    all)        cmd_install_all "$@" ;;
+    *)          die "Usage: z-bluefin-bootstrap.sh install {github-key|dotfiles|packages|all}" ;;
+  esac
 }
 
 _run_recovery_key_steps() {
   bw_login_or_unlock
   header "Recovery SSH Key"
   load_recovery_key
-}
-
-_run_all_steps() {
-  bw_login_or_unlock
-  header "GitHub SSH Key"
-  save_github_key
-  header "Dotfiles"
-  clone_and_apply_dotfiles
-  header "Packages"
-  install_packages
 }
 
 # Stdout lines for eval — parent shell sources these to inherit the agent.
@@ -353,12 +367,6 @@ cmd_recovery_key() {
   fi
 }
 
-cmd_all() {
-  _run_all_steps
-  echo
-  ok "Bootstrap complete."
-}
-
 # ── Main dispatcher ───────────────────────────────────────────────────────────
 
 main() {
@@ -367,10 +375,7 @@ main() {
   case "$cmd" in
     status)         cmd_status "$@" ;;
     set-hostname)   cmd_set_hostname "$@" ;;
-    github)         cmd_github "$@" ;;
-    dotfiles)       cmd_dotfiles "$@" ;;
-    packages)       cmd_packages "$@" ;;
-    all)            cmd_all "$@" ;;
+    install)        cmd_install "$@" ;;
     recovery-key)   cmd_recovery_key "$@" ;;
     help|--help|-h) cmd_help ;;
     *)              err "Unknown command: ${cmd}"; echo; cmd_help; exit 1 ;;
