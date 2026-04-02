@@ -9,9 +9,9 @@ set -euo pipefail
 # ── Colors ────────────────────────────────────────────────────────────────────
 if [[ -t 1 ]]; then
   RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
-  BLUE='\033[0;34m'; BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
+  BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; DIM='\033[2m'; RESET='\033[0m'
 else
-  RED=''; GREEN=''; YELLOW=''; BLUE=''; BOLD=''; DIM=''; RESET=''
+  RED=''; GREEN=''; YELLOW=''; BLUE=''; CYAN=''; BOLD=''; DIM=''; RESET=''
 fi
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -165,29 +165,29 @@ cmd_help() {
   echo -e "${BOLD}Usage:${RESET} z-bluefin-bootstrap.sh <command>"
   echo
   echo -e "${BOLD}Commands${RESET} ${DIM}(in typical setup order)${RESET}"
-  echo -e "  ${BOLD}status${RESET}                Show current state (SSH, dotfiles, chezmoi drift, brew)"
-  echo -e "  ${BOLD}set-hostname${RESET} <name>   Set the system hostname via hostnamectl"
-  echo -e "  ${BOLD}install github-key${RESET}    Save GitHub SSH key to ~/.ssh/github ${DIM}(requires Bitwarden)${RESET}"
-  echo -e "  ${BOLD}install dotfiles${RESET}      Clone z-bluefin-dotfiles and apply config files with chezmoi"
-  echo -e "  ${BOLD}install packages${RESET}      Install brew packages and flatpaks from Brewfile"
-  echo -e "  ${BOLD}install all${RESET}           Run github-key + dotfiles + packages in one shot ${DIM}(requires Bitwarden)${RESET}"
-  echo -e "  ${BOLD}recovery-key${RESET}          Load recovery SSH key into ssh-agent ${DIM}(needs eval, see below)${RESET}"
-  echo -e "  ${BOLD}help${RESET}                  Show this help"
+  echo -e "  ${CYAN}status${RESET}                Show current state (SSH, dotfiles, chezmoi drift, brew)"
+  echo -e "  ${CYAN}set-hostname${RESET} <name>   Set the system hostname via hostnamectl"
+  echo -e "  ${CYAN}install github-key${RESET}    Save GitHub SSH key to ~/.ssh/github ${DIM}(requires Bitwarden)${RESET}"
+  echo -e "  ${CYAN}install dotfiles${RESET}      Clone z-bluefin-dotfiles and apply config files with chezmoi"
+  echo -e "  ${CYAN}install packages${RESET}      Install brew packages and flatpaks from Brewfile"
+  echo -e "  ${CYAN}install all${RESET}           Run github-key + dotfiles + packages in one shot ${DIM}(requires Bitwarden)${RESET}"
+  echo -e "  ${CYAN}recovery-key${RESET}          Load recovery SSH key into ssh-agent ${DIM}(needs eval, see below)${RESET}"
+  echo -e "  ${CYAN}help${RESET}                  Show this help"
   echo
   echo -e "Each command handles Bitwarden login/unlock automatically."
   echo
   echo -e "${BOLD}Quick start${RESET}"
-  echo -e "  ./z-bluefin-bootstrap.sh status"
-  echo -e "  ./z-bluefin-bootstrap.sh set-hostname my-laptop"
-  echo -e "  ./z-bluefin-bootstrap.sh install github-key"
-  echo -e "  ./z-bluefin-bootstrap.sh install dotfiles"
-  echo -e "  ./z-bluefin-bootstrap.sh install packages"
+  echo -e "  ./z-bluefin-bootstrap.sh ${CYAN}status${RESET}"
+  echo -e "  ./z-bluefin-bootstrap.sh ${CYAN}set-hostname${RESET} my-laptop"
+  echo -e "  ./z-bluefin-bootstrap.sh ${CYAN}install github-key${RESET}"
+  echo -e "  ./z-bluefin-bootstrap.sh ${CYAN}install dotfiles${RESET}"
+  echo -e "  ./z-bluefin-bootstrap.sh ${CYAN}install packages${RESET}"
   echo
   echo -e "  ${DIM}# Or all at once:${RESET}"
-  echo -e "  ./z-bluefin-bootstrap.sh install all"
+  echo -e "  ./z-bluefin-bootstrap.sh ${CYAN}install all${RESET}"
   echo
   echo -e "  ${DIM}# Load recovery SSH key into agent:${RESET}"
-  echo -e "  eval \"\$(./z-bluefin-bootstrap.sh recovery-key)\""
+  echo -e "  eval \"\$(./z-bluefin-bootstrap.sh ${CYAN}recovery-key${RESET})\""
   echo
   echo -e "${BOLD}Digging deeper${RESET}"
   echo -e "  ${DIM}# See which dotfiles differ from chezmoi source:${RESET}"
@@ -220,6 +220,8 @@ cmd_status() {
     warn "Tailscale not installed"
   fi
 
+  header "SSH"
+
   # GitHub SSH key
   if [[ -f "$HOME/.ssh/github" ]]; then
     local perms
@@ -240,6 +242,8 @@ cmd_status() {
     warn "No github.com entry in ~/.ssh/config"
   fi
 
+  header "Dotfiles"
+
   # Dotfiles
   if [[ -d "$DOTFILES_DIR" ]]; then
     ok "Dotfiles repo present ($DOTFILES_DIR)"
@@ -258,6 +262,8 @@ cmd_status() {
   else
     warn "chezmoi not installed"
   fi
+
+  header "Packages"
 
   # Brew packages
   if have brew; then
