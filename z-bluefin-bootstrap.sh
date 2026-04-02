@@ -145,6 +145,18 @@ clone_and_apply_dotfiles() {
   ok "Dotfiles applied"
 }
 
+install_packages() {
+  require brew
+
+  local brewfile="$DOTFILES_DIR/Brewfile"
+  [[ -f "$brewfile" ]] || die "Brewfile not found at $brewfile — run 'install dotfiles' first"
+
+  info "Installing packages from Brewfile (brew + flatpak)..."
+  brew bundle install --file="$brewfile" --no-upgrade \
+    || die "brew bundle install failed"
+  ok "All packages installed"
+}
+
 # ── Command functions ─────────────────────────────────────────────────────────
 
 cmd_help() {
@@ -155,9 +167,10 @@ cmd_help() {
   echo -e "${BOLD}Commands${RESET} ${DIM}(in typical setup order)${RESET}"
   echo -e "  ${BOLD}status${RESET}                Show current state (SSH, dotfiles, chezmoi drift, brew)"
   echo -e "  ${BOLD}set-hostname${RESET} <name>   Set the system hostname via hostnamectl"
-  echo -e "  ${BOLD}install github-key${RESET}    Save GitHub SSH key to ~/.ssh/github"
-  echo -e "  ${BOLD}install dotfiles${RESET}      Clone z-bluefin-dotfiles, apply with chezmoi (incl. packages)"
-  echo -e "  ${BOLD}install all${RESET}           Run github-key + dotfiles in one shot"
+  echo -e "  ${BOLD}install github-key${RESET}    Save GitHub SSH key to ~/.ssh/github ${DIM}(requires Bitwarden)${RESET}"
+  echo -e "  ${BOLD}install dotfiles${RESET}      Clone z-bluefin-dotfiles and apply config files with chezmoi"
+  echo -e "  ${BOLD}install packages${RESET}      Install brew packages and flatpaks from Brewfile"
+  echo -e "  ${BOLD}install all${RESET}           Run github-key + dotfiles + packages in one shot ${DIM}(requires Bitwarden)${RESET}"
   echo -e "  ${BOLD}recovery-key${RESET}          Load recovery SSH key into ssh-agent ${DIM}(needs eval, see below)${RESET}"
   echo -e "  ${BOLD}help${RESET}                  Show this help"
   echo
@@ -168,6 +181,7 @@ cmd_help() {
   echo -e "  ./z-bluefin-bootstrap.sh set-hostname my-laptop"
   echo -e "  ./z-bluefin-bootstrap.sh install github-key"
   echo -e "  ./z-bluefin-bootstrap.sh install dotfiles"
+  echo -e "  ./z-bluefin-bootstrap.sh install packages"
   echo
   echo -e "  ${DIM}# Or all at once:${RESET}"
   echo -e "  ./z-bluefin-bootstrap.sh install all"
@@ -182,8 +196,6 @@ cmd_help() {
   echo -e "  chezmoi diff"
   echo -e "  ${DIM}# List missing brew packages:${RESET}"
   echo -e "  brew bundle check --file=$DOTFILES_DIR/Brewfile --no-upgrade --verbose"
-  echo -e "  ${DIM}# Force-reinstall packages from Brewfile:${RESET}"
-  echo -e "  brew bundle install --file=$DOTFILES_DIR/Brewfile --no-upgrade"
   echo -e "  ${DIM}# Re-apply dotfiles without re-cloning:${RESET}"
   echo -e "  chezmoi apply"
 }
@@ -257,7 +269,7 @@ cmd_status() {
       else
         local missing
         missing=$(printf '%s\n' "$brew_output" | grep -c '^→' || true)
-        warn "Brewfile: ${missing} package(s) missing — run 'install dotfiles' to install"
+        warn "Brewfile: ${missing} package(s) missing — run 'install packages' to install"
       fi
     fi
   else
@@ -290,12 +302,19 @@ cmd_install_dotfiles() {
   clone_and_apply_dotfiles
 }
 
+cmd_install_packages() {
+  header "Packages"
+  install_packages
+}
+
 cmd_install_all() {
   bw_login_or_unlock
   header "GitHub SSH Key"
   save_github_key
   header "Dotfiles"
   clone_and_apply_dotfiles
+  header "Packages"
+  install_packages
   echo
   ok "Bootstrap complete."
 }
@@ -306,8 +325,9 @@ cmd_install() {
   case "$subcmd" in
     github-key) cmd_install_github_key "$@" ;;
     dotfiles)   cmd_install_dotfiles "$@" ;;
+    packages)   cmd_install_packages "$@" ;;
     all)        cmd_install_all "$@" ;;
-    *)          die "Usage: z-bluefin-bootstrap.sh install {github-key|dotfiles|all}" ;;
+    *)          die "Usage: z-bluefin-bootstrap.sh install {github-key|dotfiles|packages|all}" ;;
   esac
 }
 
