@@ -19,6 +19,7 @@ setup() {
   assert_output --partial "github"
   assert_output --partial "recovery-key"
   assert_output --partial "dotfiles"
+  assert_output --partial "packages"
 }
 
 @test "--help: shows usage text" {
@@ -86,16 +87,20 @@ setup() {
 
 # ── all ──────────────────────────────────────────────────────────────────────
 
-@test "all: runs login + github + dotfiles" {
+@test "all: runs login + github + dotfiles + packages" {
   mock_bw_status unauthenticated
   mock_jq_sequence "unauthenticated" "-----BEGIN OPENSSH PRIVATE KEY-----"
   mock_cmd git 0
   mock_cmd chezmoi 0
+  mock_cmd brew 0
+  mkdir -p "$HOME/z-bluefin-dotfiles"
+  touch "$HOME/z-bluefin-dotfiles/Brewfile"
   run bash "$BOOTSTRAP" all
   assert_success
   assert_output --partial "BW_SESSION exported"
   assert_output --partial "GitHub SSH key saved"
   assert_output --partial "Dotfiles applied"
+  assert_output --partial "All packages installed"
   assert_output --partial "Bootstrap complete."
   refute_output --partial "Git identity"
   refute_output --partial "Primary SSH key"
@@ -131,6 +136,24 @@ setup() {
   run bash "$BOOTSTRAP" set-hostname test-host
   assert_success
   assert_output --partial "Hostname set to 'test-host'"
+}
+
+# ── packages ─────────────────────────────────────────────────────────────────
+
+@test "packages: fails when Brewfile missing" {
+  mock_cmd brew 0
+  run bash "$BOOTSTRAP" packages
+  assert_failure
+  assert_output --partial "Brewfile not found"
+}
+
+@test "packages: installs from Brewfile" {
+  mock_cmd brew 0
+  mkdir -p "$HOME/z-bluefin-dotfiles"
+  touch "$HOME/z-bluefin-dotfiles/Brewfile"
+  run bash "$BOOTSTRAP" packages
+  assert_success
+  assert_output --partial "All packages installed"
 }
 
 # ── dotfiles ─────────────────────────────────────────────────────────────────

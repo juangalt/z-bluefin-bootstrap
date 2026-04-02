@@ -145,6 +145,18 @@ clone_and_apply_dotfiles() {
   ok "Dotfiles applied"
 }
 
+install_packages() {
+  require brew
+
+  local brewfile="$DOTFILES_DIR/Brewfile"
+  [[ -f "$brewfile" ]] || die "Brewfile not found at $brewfile — run 'dotfiles' first"
+
+  info "Installing packages from Brewfile (brew + flatpak)..."
+  brew bundle install --file="$brewfile" --no-upgrade \
+    || die "brew bundle install failed"
+  ok "All packages installed"
+}
+
 # ── Command functions ─────────────────────────────────────────────────────────
 
 cmd_help() {
@@ -157,7 +169,8 @@ cmd_help() {
   echo -e "  ${BOLD}set-hostname${RESET} <name> Set the system hostname via hostnamectl"
   echo -e "  ${BOLD}github${RESET}              Save GitHub SSH key to ~/.ssh/github"
   echo -e "  ${BOLD}dotfiles${RESET}            Clone z-bluefin-dotfiles and apply with chezmoi"
-  echo -e "  ${BOLD}all${RESET}                 Run github + dotfiles in one shot"
+  echo -e "  ${BOLD}packages${RESET}            Install brew packages and flatpaks from Brewfile"
+  echo -e "  ${BOLD}all${RESET}                 Run github + dotfiles + packages in one shot"
   echo -e "  ${BOLD}recovery-key${RESET}        Load recovery SSH key into ssh-agent ${DIM}(optional, needs eval)${RESET}"
   echo -e "  ${BOLD}help${RESET}                Show this help"
   echo
@@ -168,6 +181,7 @@ cmd_help() {
   echo -e "  ./z-bluefin-bootstrap.sh set-hostname my-laptop"
   echo -e "  ./z-bluefin-bootstrap.sh github"
   echo -e "  ./z-bluefin-bootstrap.sh dotfiles"
+  echo -e "  ./z-bluefin-bootstrap.sh packages"
   echo
   echo -e "  ${DIM}# Or all at once:${RESET}"
   echo -e "  ./z-bluefin-bootstrap.sh all"
@@ -255,7 +269,7 @@ cmd_status() {
       else
         local missing
         missing=$(printf '%s\n' "$brew_output" | grep -c '^→' || true)
-        warn "Brewfile: ${missing} package(s) missing — run 'brew bundle install'"
+        warn "Brewfile: ${missing} package(s) missing — run 'packages' to install"
       fi
     fi
   else
@@ -288,6 +302,11 @@ cmd_dotfiles() {
   clone_and_apply_dotfiles
 }
 
+cmd_packages() {
+  header "Packages"
+  install_packages
+}
+
 _run_recovery_key_steps() {
   bw_login_or_unlock
   header "Recovery SSH Key"
@@ -300,6 +319,8 @@ _run_all_steps() {
   save_github_key
   header "Dotfiles"
   clone_and_apply_dotfiles
+  header "Packages"
+  install_packages
 }
 
 # Stdout lines for eval — parent shell sources these to inherit the agent.
@@ -348,6 +369,7 @@ main() {
     set-hostname)   cmd_set_hostname "$@" ;;
     github)         cmd_github "$@" ;;
     dotfiles)       cmd_dotfiles "$@" ;;
+    packages)       cmd_packages "$@" ;;
     all)            cmd_all "$@" ;;
     recovery-key)   cmd_recovery_key "$@" ;;
     help|--help|-h) cmd_help ;;
