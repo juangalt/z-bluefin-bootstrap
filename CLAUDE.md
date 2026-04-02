@@ -12,9 +12,8 @@ The only executable is `z-bluefin-bootstrap.sh`. Commands:
 ./z-bluefin-bootstrap.sh status                         # Check current state
 ./z-bluefin-bootstrap.sh set-hostname my-laptop         # Set system hostname
 ./z-bluefin-bootstrap.sh install github-key             # Save GitHub SSH key
-./z-bluefin-bootstrap.sh install dotfiles               # Clone z-bluefin-dotfiles + chezmoi apply
-./z-bluefin-bootstrap.sh install packages               # Install brew packages + flatpaks from Brewfile
-./z-bluefin-bootstrap.sh install all                    # Run github-key + dotfiles + packages in one shot
+./z-bluefin-bootstrap.sh install dotfiles               # Clone z-bluefin-dotfiles + chezmoi apply (incl. packages)
+./z-bluefin-bootstrap.sh install all                    # Run github-key + dotfiles in one shot
 eval "$(./z-bluefin-bootstrap.sh recovery-key)"         # Load recovery key into ssh-agent
 ```
 
