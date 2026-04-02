@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# z-bootstrap.sh — SSH key provisioning via Bitwarden
+# z-bluefin-bootstrap.sh — Bluefin laptop bootstrap
 #
-# Usage: z-bootstrap.sh <command> [options]
-# Run:   z-bootstrap.sh help
+# Usage: z-bluefin-bootstrap.sh <command> [options]
+# Run:   z-bluefin-bootstrap.sh help
 
 set -euo pipefail
 
@@ -26,6 +26,10 @@ have() { command -v "$1" &>/dev/null; }
 require() {
   have "$1" || die "Required tool not found: $1"
 }
+
+# ── Configuration ─────────────────────────────────────────────────────────────
+DOTFILES_REPO="git@github.com:juangalt/z-bluefin-dotfiles.git"
+DOTFILES_DIR="$HOME/z-bluefin-dotfiles"
 
 # ── Domain functions ──────────────────────────────────────────────────────────
 
@@ -132,28 +136,125 @@ load_primary_key() {
   ok "Primary SSH key loaded into ssh-agent"
 }
 
+clone_and_apply_dotfiles() {
+  require git
+
+  if ! have chezmoi; then
+    require brew
+    info "Installing chezmoi..."
+    brew install chezmoi || die "Failed to install chezmoi"
+    ok "chezmoi installed"
+  fi
+
+  if [[ -d "$DOTFILES_DIR" ]]; then
+    info "Dotfiles repo already cloned at $DOTFILES_DIR — pulling latest..."
+    git -C "$DOTFILES_DIR" pull || die "git pull failed in $DOTFILES_DIR"
+    ok "Dotfiles repo updated"
+  else
+    info "Cloning dotfiles repo..."
+    git clone "$DOTFILES_REPO" "$DOTFILES_DIR" || die "git clone failed for $DOTFILES_REPO"
+    ok "Dotfiles repo cloned to $DOTFILES_DIR"
+  fi
+
+  info "Applying dotfiles with chezmoi..."
+  chezmoi init --source "$DOTFILES_DIR" --apply || die "chezmoi init --apply failed"
+  ok "Dotfiles applied"
+}
+
 # ── Command functions ─────────────────────────────────────────────────────────
 
 cmd_help() {
   cat <<EOF
-z-bootstrap.sh — SSH key provisioning via Bitwarden
+z-bluefin-bootstrap.sh — Bluefin laptop bootstrap
 
-Usage: z-bootstrap.sh <command>
+Usage: z-bluefin-bootstrap.sh <command>
 
 Commands:
   github            Log in + save GitHub SSH key + configure git identity
   primary           Log in + load primary SSH key into ssh-agent (never on disk)
-  all               Run github + primary in sequence
+  dotfiles          Clone z-bluefin-dotfiles and apply with chezmoi
+  all               Run github + primary + dotfiles in sequence
+  status            Show system status (hostname, tailscale, SSH keys, dotfiles)
+  set-hostname NAME Set the system hostname via hostnamectl
   help              Show this help
 
 If run inside eval, primary and all auto-export ssh-agent variables.
 
 Examples:
-  ./z-bootstrap.sh github
-  ./z-bootstrap.sh primary
-  eval "\$(./z-bootstrap.sh primary)"
-  eval "\$(./z-bootstrap.sh all)"
+  ./z-bluefin-bootstrap.sh github
+  ./z-bluefin-bootstrap.sh primary
+  eval "\$(./z-bluefin-bootstrap.sh primary)"
+  eval "\$(./z-bluefin-bootstrap.sh all)"
 EOF
+}
+
+cmd_status() {
+  header "System Status"
+
+  # Hostname
+  info "Hostname: $(hostname 2>/dev/null || echo 'unknown')"
+
+  # Tailscale
+  if have tailscale; then
+    local ts_json
+    if ts_json=$(tailscale status --json 2>/dev/null); then
+      local ts_host
+      ts_host=$(printf '%s' "$ts_json" | jq -r '.Self.HostName // "unknown"')
+      ok "Tailscale running — hostname: ${ts_host}"
+    else
+      warn "Tailscale installed but not running"
+    fi
+  else
+    warn "Tailscale not installed"
+  fi
+
+  # GitHub SSH key
+  if [[ -f "$HOME/.ssh/github" ]]; then
+    local perms
+    perms=$(stat -c '%a' "$HOME/.ssh/github" 2>/dev/null || echo "???")
+    if [[ "$perms" == "600" ]]; then
+      ok "GitHub SSH key installed (~/.ssh/github, mode 600)"
+    else
+      warn "GitHub SSH key exists but permissions are ${perms} (expected 600)"
+    fi
+  else
+    warn "GitHub SSH key not installed"
+  fi
+
+  # Git identity
+  local git_name git_email
+  git_name=$(git config --global user.name 2>/dev/null || true)
+  git_email=$(git config --global user.email 2>/dev/null || true)
+  if [[ -n "$git_name" && -n "$git_email" ]]; then
+    ok "Git identity: ${git_name} <${git_email}>"
+  elif [[ -z "$git_name" && -z "$git_email" ]]; then
+    warn "Git identity not configured"
+  else
+    warn "Git identity partially configured (name=${git_name:-unset}, email=${git_email:-unset})"
+  fi
+
+  # Dotfiles
+  if [[ -d "$DOTFILES_DIR" ]]; then
+    ok "Dotfiles repo present ($DOTFILES_DIR)"
+  else
+    warn "Dotfiles repo not cloned"
+  fi
+  if have chezmoi; then
+    ok "chezmoi installed"
+  else
+    warn "chezmoi not installed"
+  fi
+}
+
+cmd_set_hostname() {
+  local new_hostname="${1:-}"
+  [[ -n "$new_hostname" ]] || die "Usage: z-bluefin-bootstrap.sh set-hostname <name>"
+  require hostnamectl
+  header "Set Hostname"
+  info "Setting hostname to '${new_hostname}'..."
+  hostnamectl set-hostname "$new_hostname" \
+    || die "hostnamectl set-hostname failed"
+  ok "Hostname set to '${new_hostname}'"
 }
 
 cmd_github() {
@@ -164,26 +265,59 @@ cmd_github() {
   configure_git_identity
 }
 
+cmd_dotfiles() {
+  if [[ ! -f "$HOME/.ssh/github" ]]; then
+    warn "GitHub SSH key not found — clone may fail. Run 'github' command first."
+  fi
+  header "Dotfiles"
+  clone_and_apply_dotfiles
+}
+
+_run_primary_steps() {
+  bw_login_or_unlock
+  header "Primary SSH Key"
+  load_primary_key
+}
+
+_run_all_steps() {
+  bw_login_or_unlock
+  header "GitHub SSH Key"
+  save_github_key
+  header "Git Identity"
+  configure_git_identity
+  header "Primary SSH Key"
+  load_primary_key
+  header "Dotfiles"
+  clone_and_apply_dotfiles
+}
+
+# Stdout lines for eval — parent shell sources these to inherit the agent.
+_emit_agent_exports() {
+  [[ -n "${SSH_AUTH_SOCK:-}" ]] && printf 'export SSH_AUTH_SOCK=%q\n' "$SSH_AUTH_SOCK"
+  [[ -n "${SSH_AGENT_PID:-}" ]] && printf 'export SSH_AGENT_PID=%q\n' "$SSH_AGENT_PID"
+  echo 'hash -r'
+}
+
+# ssh-agent vars live in the subprocess; without eval they're lost on exit.
+_warn_agent_subprocess() {
+  local cmd="$1" had_agent="$2"
+  if [[ -z "$had_agent" ]]; then
+    echo
+    warn "ssh-agent was started in a subprocess — its variables won't persist."
+    info "To keep them in your current shell, run:"
+    echo -e "  ${BOLD}eval \"\$(./z-bluefin-bootstrap.sh ${cmd})\"${RESET}"
+  fi
+}
+
 cmd_primary() {
   local had_agent=$([[ -n "${SSH_AUTH_SOCK:-}" ]] && echo yes || true)
 
   if [[ ! -t 1 ]]; then
-    bw_login_or_unlock >&2
-    header "Primary SSH Key" >&2
-    load_primary_key >&2
-    [[ -n "${SSH_AUTH_SOCK:-}" ]] && printf 'export SSH_AUTH_SOCK=%q\n' "$SSH_AUTH_SOCK"
-    [[ -n "${SSH_AGENT_PID:-}" ]] && printf 'export SSH_AGENT_PID=%q\n' "$SSH_AGENT_PID"
-    echo 'hash -r'
+    _run_primary_steps >&2
+    _emit_agent_exports
   else
-    bw_login_or_unlock
-    header "Primary SSH Key"
-    load_primary_key
-    if [[ -z "$had_agent" ]]; then
-      echo
-      warn "ssh-agent was started in a subprocess — its variables won't persist."
-      info "To keep them in your current shell, run:"
-      echo -e "  ${BOLD}eval \"\$(./z-bootstrap.sh primary)\"${RESET}"
-    fi
+    _run_primary_steps
+    _warn_agent_subprocess primary "$had_agent"
   fi
 }
 
@@ -191,32 +325,14 @@ cmd_all() {
   local had_agent=$([[ -n "${SSH_AUTH_SOCK:-}" ]] && echo yes || true)
 
   if [[ ! -t 1 ]]; then
-    bw_login_or_unlock >&2
-    header "GitHub SSH Key" >&2
-    save_github_key >&2
-    header "Git Identity" >&2
-    configure_git_identity >&2
-    header "Primary SSH Key" >&2
-    load_primary_key >&2
+    _run_all_steps >&2
     printf 'export BW_SESSION=%q\n' "$BW_SESSION"
-    [[ -n "${SSH_AUTH_SOCK:-}" ]] && printf 'export SSH_AUTH_SOCK=%q\n' "$SSH_AUTH_SOCK"
-    [[ -n "${SSH_AGENT_PID:-}" ]] && printf 'export SSH_AGENT_PID=%q\n' "$SSH_AGENT_PID"
-    echo 'hash -r'
+    _emit_agent_exports
   else
-    bw_login_or_unlock
-    header "GitHub SSH Key"
-    save_github_key
-    header "Git Identity"
-    configure_git_identity
-    header "Primary SSH Key"
-    load_primary_key
+    _run_all_steps
     echo
-    ok "All keys provisioned."
-    if [[ -z "$had_agent" ]]; then
-      warn "ssh-agent was started in a subprocess — its variables won't persist."
-      info "To keep them in your current shell, run:"
-      echo -e "  ${BOLD}eval \"\$(./z-bootstrap.sh all)\"${RESET}"
-    fi
+    ok "Bootstrap complete."
+    _warn_agent_subprocess all "$had_agent"
   fi
 }
 
@@ -229,7 +345,10 @@ main() {
     help|--help|-h) cmd_help ;;
     github)         cmd_github "$@" ;;
     primary)        cmd_primary "$@" ;;
+    dotfiles)       cmd_dotfiles "$@" ;;
     all)            cmd_all "$@" ;;
+    status)         cmd_status "$@" ;;
+    set-hostname)   cmd_set_hostname "$@" ;;
     *)              err "Unknown command: ${cmd}"; echo; cmd_help; exit 1 ;;
   esac
 }

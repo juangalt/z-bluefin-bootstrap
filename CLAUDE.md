@@ -2,17 +2,18 @@
 
 ## What this repo is
 
-`z-bootstrap` is a standalone Bash CLI tool that provisions SSH keys via Bitwarden. It extracts the identity/key management logic from `z-workstation`'s Layer 1 into a focused, independent tool.
+`z-bluefin-bootstrap` is a Bash CLI tool that orchestrates the setup of a new Bluefin laptop (assumes Bluefin DX is installed). It provisions SSH keys via Bitwarden, sets the hostname, and recovers dotfiles/configuration from the `z-bluefin-dotfiles` repo.
 
 ## CLI
 
-The only executable is `z-bootstrap.sh`. Commands:
+The only executable is `z-bluefin-bootstrap.sh`. Commands:
 
 ```bash
-./z-bootstrap.sh github                         # Log in + save GitHub SSH key + configure git identity
-./z-bootstrap.sh primary                        # Log in + load primary key into ssh-agent
-eval "$(./z-bootstrap.sh primary)"              # Same, with ssh-agent vars in host shell
-eval "$(./z-bootstrap.sh all)"                  # Run github + primary with env export
+./z-bluefin-bootstrap.sh github                         # Log in + save GitHub SSH key + configure git identity
+./z-bluefin-bootstrap.sh primary                        # Log in + load primary key into ssh-agent
+eval "$(./z-bluefin-bootstrap.sh primary)"              # Same, with ssh-agent vars in host shell
+./z-bluefin-bootstrap.sh dotfiles                       # Clone z-bluefin-dotfiles + chezmoi apply
+eval "$(./z-bluefin-bootstrap.sh all)"                  # Run github + primary + dotfiles with env export
 ```
 
 ## Key design constraints
@@ -21,6 +22,8 @@ eval "$(./z-bootstrap.sh all)"                  # Run github + primary with env 
 - **GitHub key is written to disk** at `~/.ssh/github` with 600 permissions.
 - **Primary key is never written to disk** — loaded into ssh-agent only.
 - `primary` and `all` auto-detect eval mode (non-TTY stdout) and export ssh-agent variables.
+- **Dotfiles** are cloned from `git@github.com:juangalt/z-bluefin-dotfiles.git` to `~/z-bluefin-dotfiles` and applied via `chezmoi init --source ... --apply`.
+- `chezmoi` is auto-installed via `brew` if missing.
 
 ## Bitwarden items
 

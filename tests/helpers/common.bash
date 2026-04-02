@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Common setup helpers for the z-bootstrap.sh test suite.
+# Common setup helpers for the z-bluefin-bootstrap.sh test suite.
 
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BOOTSTRAP="$TESTS_DIR/../z-bootstrap.sh"
+BOOTSTRAP="$TESTS_DIR/../z-bluefin-bootstrap.sh"
 
 # Load bats-support and bats-assert from vendored submodules.
 load "$TESTS_DIR/bats.d/bats-support/load"
 load "$TESTS_DIR/bats.d/bats-assert/load"
 
-# Source z-bootstrap.sh with main() stubbed so individual functions can be called
+# Source z-bluefin-bootstrap.sh with main() stubbed so individual functions can be called
 # directly. Relies on main "$@" being the last line of the script.
 load_bootstrap_functions() {
   # shellcheck disable=SC1090
