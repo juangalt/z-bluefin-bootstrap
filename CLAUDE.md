@@ -1,5 +1,9 @@
 # CLAUDE.md
 
+## Public repository
+
+This repo is **public**. Never commit secrets, credentials, API keys, private keys, or personal information. Bitwarden item names are acceptable (they are not secrets), but actual key material must never appear in code, tests, or git history.
+
 ## What this repo is
 
 `z-bluefin-bootstrap` is a Bash CLI tool that orchestrates the setup of a new Bluefin laptop (assumes Bluefin DX is installed). It provisions SSH keys via Bitwarden, sets the hostname, and recovers dotfiles/configuration from the `z-bluefin-dotfiles` repo.
@@ -25,13 +29,14 @@ eval "$(./z-bluefin-bootstrap.sh recovery-key)"         # Load recovery key into
 - **Recovery key is never written to disk** — loaded into ssh-agent only.
 - `recovery-key` auto-detects eval mode (non-TTY stdout) and exports ssh-agent variables.
 - **Dotfiles** are cloned from `git@github.com:juangalt/z-bluefin-dotfiles.git` to `~/z-bluefin-dotfiles` and applied via `chezmoi init --source ... --apply`.
+- **Packages** are installed by bootstrap via `brew bundle install` from the Brewfile in the dotfiles repo (not by chezmoi run scripts).
 - `chezmoi` is auto-installed via `brew` if missing.
 
 ## Bitwarden items
 
 | Command | Item name | JSON path |
 |---|---|---|
-| `github` | `ssh-access service key: github` | `.sshKey.privateKey` |
+| `install github-key` | `ssh-access service key: github` | `.sshKey.privateKey` |
 | `recovery-key` | `SSH Key - id_ed25519 - PRIMARY/RECOVERY` | `.sshKey.privateKey` |
 
 ## Testing
