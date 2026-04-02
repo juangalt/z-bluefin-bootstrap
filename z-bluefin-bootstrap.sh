@@ -96,42 +96,19 @@ save_github_key() {
   fi
 }
 
-configure_git_identity() {
-  require bw
-  require jq
-  require git
-  require_bw_session
-
-  info "Fetching git identity from Bitwarden..."
-  local item
-  item=$(bw get item "git-identity" --session "$BW_SESSION") \
-    || die "Failed to fetch 'git-identity' from Bitwarden"
-
-  local name email
-  name=$(printf '%s' "$item" | jq -r '.login.username')
-  email=$(printf '%s' "$item" | jq -r '.login.password')
-
-  [[ -n "$name" ]] || die "Git user.name is empty — check the 'git-identity' Bitwarden item"
-  [[ -n "$email" ]] || die "Git user.email is empty — check the 'git-identity' Bitwarden item"
-
-  git config --global user.name "$name"
-  git config --global user.email "$email"
-  ok "Git identity configured: $name <$email>"
-}
-
-load_primary_key() {
+load_recovery_key() {
   require bw
   require jq
   require ssh-add
   require ssh-agent
   require_bw_session
 
-  info "Fetching primary SSH key from Bitwarden..."
+  info "Fetching recovery SSH key from Bitwarden..."
   local key
   key=$(bw get item "SSH Key - id_ed25519 - PRIMARY/RECOVERY" --session "$BW_SESSION" | jq -r '.sshKey.privateKey') \
     || die "Failed to fetch 'SSH Key - id_ed25519 - PRIMARY/RECOVERY' from Bitwarden"
 
-  [[ -n "$key" ]] || die "Primary SSH key is empty — check the Bitwarden item"
+  [[ -n "$key" ]] || die "Recovery SSH key is empty — check the Bitwarden item"
 
   if [[ -z "${SSH_AUTH_SOCK:-}" ]]; then
     eval "$(ssh-agent -s)" > /dev/null
@@ -139,8 +116,8 @@ load_primary_key() {
   fi
 
   echo "$key" | ssh-add - 2>/dev/null \
-    || die "Failed to load primary SSH key into ssh-agent"
-  ok "Primary SSH key loaded into ssh-agent"
+    || die "Failed to load recovery SSH key into ssh-agent"
+  ok "Recovery SSH key loaded into ssh-agent"
 }
 
 clone_and_apply_dotfiles() {
@@ -176,12 +153,12 @@ cmd_help() {
   echo -e "${BOLD}Usage:${RESET} z-bluefin-bootstrap.sh <command>"
   echo
   echo -e "${BOLD}Commands${RESET} ${DIM}(in typical setup order)${RESET}"
-  echo -e "  ${BOLD}status${RESET}              Show current state (hostname, SSH keys, dotfiles, git)"
+  echo -e "  ${BOLD}status${RESET}              Show current state (SSH, dotfiles, chezmoi drift, brew)"
   echo -e "  ${BOLD}set-hostname${RESET} <name> Set the system hostname via hostnamectl"
-  echo -e "  ${BOLD}github${RESET}              Save GitHub SSH key to ~/.ssh/github + configure git identity"
+  echo -e "  ${BOLD}github${RESET}              Save GitHub SSH key to ~/.ssh/github"
   echo -e "  ${BOLD}dotfiles${RESET}            Clone z-bluefin-dotfiles and apply with chezmoi"
   echo -e "  ${BOLD}all${RESET}                 Run github + dotfiles in one shot"
-  echo -e "  ${BOLD}primary${RESET}             Load primary SSH key into ssh-agent ${DIM}(optional, needs eval)${RESET}"
+  echo -e "  ${BOLD}recovery-key${RESET}        Load recovery SSH key into ssh-agent ${DIM}(optional, needs eval)${RESET}"
   echo -e "  ${BOLD}help${RESET}                Show this help"
   echo
   echo -e "Each command handles Bitwarden login/unlock automatically."
@@ -195,8 +172,18 @@ cmd_help() {
   echo -e "  ${DIM}# Or all at once:${RESET}"
   echo -e "  ./z-bluefin-bootstrap.sh all"
   echo
-  echo -e "  ${DIM}# Optional — load primary SSH key into agent:${RESET}"
-  echo -e "  eval \"\$(./z-bluefin-bootstrap.sh primary)\""
+  echo -e "  ${DIM}# Optional — load recovery SSH key into agent:${RESET}"
+  echo -e "  eval \"\$(./z-bluefin-bootstrap.sh recovery-key)\""
+  echo
+  echo -e "${BOLD}Digging deeper${RESET}"
+  echo -e "  ${DIM}# See which dotfiles differ from chezmoi source:${RESET}"
+  echo -e "  chezmoi status"
+  echo -e "  ${DIM}# Show the actual diff for a drifted file:${RESET}"
+  echo -e "  chezmoi diff"
+  echo -e "  ${DIM}# List missing brew packages:${RESET}"
+  echo -e "  brew bundle check --file=$DOTFILES_DIR/Brewfile --no-upgrade --verbose"
+  echo -e "  ${DIM}# Re-apply dotfiles without re-cloning:${RESET}"
+  echo -e "  chezmoi apply"
 }
 
 cmd_status() {
@@ -232,16 +219,11 @@ cmd_status() {
     warn "GitHub SSH key not installed"
   fi
 
-  # Git identity
-  local git_name git_email
-  git_name=$(git config --global user.name 2>/dev/null || true)
-  git_email=$(git config --global user.email 2>/dev/null || true)
-  if [[ -n "$git_name" && -n "$git_email" ]]; then
-    ok "Git identity: ${git_name} <${git_email}>"
-  elif [[ -z "$git_name" && -z "$git_email" ]]; then
-    warn "Git identity not configured"
+  # SSH config
+  if grep -q "Host github.com" "$HOME/.ssh/config" 2>/dev/null; then
+    ok "SSH config has github.com entry"
   else
-    warn "Git identity partially configured (name=${git_name:-unset}, email=${git_email:-unset})"
+    warn "No github.com entry in ~/.ssh/config"
   fi
 
   # Dotfiles
@@ -252,8 +234,32 @@ cmd_status() {
   fi
   if have chezmoi; then
     ok "chezmoi installed"
+    local drift
+    drift=$(chezmoi status 2>/dev/null | grep -c '.' || true)
+    if [[ "$drift" -eq 0 ]]; then
+      ok "chezmoi: all managed files in sync"
+    else
+      warn "chezmoi: ${drift} file(s) out of sync — run 'dotfiles' to re-apply"
+    fi
   else
     warn "chezmoi not installed"
+  fi
+
+  # Brew packages
+  if have brew; then
+    local brewfile="$DOTFILES_DIR/Brewfile"
+    if [[ -f "$brewfile" ]]; then
+      local brew_output
+      if brew_output=$(brew bundle check --file="$brewfile" --no-upgrade --verbose 2>/dev/null); then
+        ok "Brewfile: all packages installed"
+      else
+        local missing
+        missing=$(printf '%s\n' "$brew_output" | grep -c '^→' || true)
+        warn "Brewfile: ${missing} package(s) missing — run 'brew bundle install'"
+      fi
+    fi
+  else
+    warn "Homebrew not installed"
   fi
 }
 
@@ -272,8 +278,6 @@ cmd_github() {
   bw_login_or_unlock
   header "GitHub SSH Key"
   save_github_key
-  header "Git Identity"
-  configure_git_identity
 }
 
 cmd_dotfiles() {
@@ -284,18 +288,16 @@ cmd_dotfiles() {
   clone_and_apply_dotfiles
 }
 
-_run_primary_steps() {
+_run_recovery_key_steps() {
   bw_login_or_unlock
-  header "Primary SSH Key"
-  load_primary_key
+  header "Recovery SSH Key"
+  load_recovery_key
 }
 
 _run_all_steps() {
   bw_login_or_unlock
   header "GitHub SSH Key"
   save_github_key
-  header "Git Identity"
-  configure_git_identity
   header "Dotfiles"
   clone_and_apply_dotfiles
 }
@@ -318,15 +320,15 @@ _warn_agent_subprocess() {
   fi
 }
 
-cmd_primary() {
+cmd_recovery_key() {
   local had_agent=$([[ -n "${SSH_AUTH_SOCK:-}" ]] && echo yes || true)
 
   if [[ ! -t 1 ]]; then
-    _run_primary_steps >&2
+    _run_recovery_key_steps >&2
     _emit_agent_exports
   else
-    _run_primary_steps
-    _warn_agent_subprocess primary "$had_agent"
+    _run_recovery_key_steps
+    _warn_agent_subprocess recovery-key "$had_agent"
   fi
 }
 
@@ -347,7 +349,7 @@ main() {
     github)         cmd_github "$@" ;;
     dotfiles)       cmd_dotfiles "$@" ;;
     all)            cmd_all "$@" ;;
-    primary)        cmd_primary "$@" ;;
+    recovery-key)   cmd_recovery_key "$@" ;;
     help|--help|-h) cmd_help ;;
     *)              err "Unknown command: ${cmd}"; echo; cmd_help; exit 1 ;;
   esac

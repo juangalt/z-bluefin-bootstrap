@@ -11,18 +11,18 @@ The only executable is `z-bluefin-bootstrap.sh`. Commands:
 ```bash
 ./z-bluefin-bootstrap.sh status                         # Check current state
 ./z-bluefin-bootstrap.sh set-hostname my-laptop         # Set system hostname
-./z-bluefin-bootstrap.sh github                         # Save GitHub SSH key + configure git identity
+./z-bluefin-bootstrap.sh github                         # Save GitHub SSH key
 ./z-bluefin-bootstrap.sh dotfiles                       # Clone z-bluefin-dotfiles + chezmoi apply
 ./z-bluefin-bootstrap.sh all                            # Run github + dotfiles in one shot
-eval "$(./z-bluefin-bootstrap.sh primary)"              # Optional: load primary key into ssh-agent
+eval "$(./z-bluefin-bootstrap.sh recovery-key)"         # Optional: load recovery key into ssh-agent
 ```
 
 ## Key design constraints
 
 - Each command handles Bitwarden login internally — no separate login step.
 - **GitHub key is written to disk** at `~/.ssh/github` with 600 permissions.
-- **Primary key is never written to disk** — loaded into ssh-agent only.
-- `primary` auto-detects eval mode (non-TTY stdout) and exports ssh-agent variables.
+- **Recovery key is never written to disk** — loaded into ssh-agent only.
+- `recovery-key` auto-detects eval mode (non-TTY stdout) and exports ssh-agent variables.
 - **Dotfiles** are cloned from `git@github.com:juangalt/z-bluefin-dotfiles.git` to `~/z-bluefin-dotfiles` and applied via `chezmoi init --source ... --apply`.
 - `chezmoi` is auto-installed via `brew` if missing.
 
@@ -31,8 +31,7 @@ eval "$(./z-bluefin-bootstrap.sh primary)"              # Optional: load primary
 | Command | Item name | JSON path |
 |---|---|---|
 | `github` | `ssh-access service key: github` | `.sshKey.privateKey` |
-| `github` | `git-identity` | `.login.username` (name), `.login.password` (email) |
-| `primary` | `SSH Key - id_ed25519 - PRIMARY/RECOVERY` | `.sshKey.privateKey` |
+| `recovery-key` | `SSH Key - id_ed25519 - PRIMARY/RECOVERY` | `.sshKey.privateKey` |
 
 ## Testing
 

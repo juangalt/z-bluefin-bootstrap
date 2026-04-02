@@ -17,7 +17,7 @@ setup() {
   assert_success
   assert_output --partial "Bluefin laptop bootstrap"
   assert_output --partial "github"
-  assert_output --partial "primary"
+  assert_output --partial "recovery-key"
   assert_output --partial "dotfiles"
 }
 
@@ -35,70 +35,69 @@ setup() {
 
 # ── github ───────────────────────────────────────────────────────────────────
 
-@test "github: logs in, saves key, and configures git identity" {
+@test "github: logs in and saves key" {
   mock_bw_status unauthenticated
-  mock_jq_sequence "unauthenticated" "-----BEGIN OPENSSH PRIVATE KEY-----" "Test User" "test@example.com"
-  mock_cmd git 0
+  mock_jq_sequence "unauthenticated" "-----BEGIN OPENSSH PRIVATE KEY-----"
   run bash "$BOOTSTRAP" github
   assert_success
   assert_output --partial "BW_SESSION exported"
   assert_output --partial "GitHub SSH key saved"
-  assert_output --partial "Git identity configured"
+  refute_output --partial "Git identity"
   [[ -f "$HOME/.ssh/github" ]]
   [[ "$(stat -c '%a' "$HOME/.ssh/github")" == "600" ]]
 }
 
-# ── primary ──────────────────────────────────────────────────────────────────
+# ── recovery-key ─────────────────────────────────────────────────────────────
 
-@test "primary: logs in and loads key into ssh-agent" {
+@test "recovery-key: logs in and loads key into ssh-agent" {
   mock_bw_status unauthenticated
   mock_jq_sequence "unauthenticated" "-----BEGIN OPENSSH PRIVATE KEY-----"
   mock_cmd ssh-add 0
   mock_ssh_agent
   # run captures stdout (non-TTY), so auto-detect triggers eval mode;
   # progress goes to stderr which run also captures
-  run bash "$BOOTSTRAP" primary
+  run bash "$BOOTSTRAP" recovery-key
   assert_success
   assert_output --partial "BW_SESSION exported"
-  assert_output --partial "Primary SSH key loaded"
+  assert_output --partial "Recovery SSH key loaded"
   assert_output --partial "export SSH_AUTH_SOCK="
 }
 
-@test "primary: eval mode exports ssh-agent vars" {
+@test "recovery-key: eval mode exports ssh-agent vars" {
   mock_bw_status unauthenticated
   mock_jq_sequence "unauthenticated" "-----BEGIN OPENSSH PRIVATE KEY-----"
   mock_cmd ssh-add 0
   mock_ssh_agent
-  run bash -c "bash '$BOOTSTRAP' primary 2>/dev/null"
+  run bash -c "bash '$BOOTSTRAP' recovery-key 2>/dev/null"
   assert_success
   assert_output --partial "export SSH_AUTH_SOCK="
   assert_output --partial "hash -r"
 }
 
-@test "primary: eval mode sends progress to stderr only" {
+@test "recovery-key: eval mode sends progress to stderr only" {
   mock_bw_status unauthenticated
   mock_jq_sequence "unauthenticated" "-----BEGIN OPENSSH PRIVATE KEY-----"
   mock_cmd ssh-add 0
   mock_ssh_agent
-  run bash -c "bash '$BOOTSTRAP' primary 2>/dev/null"
+  run bash -c "bash '$BOOTSTRAP' recovery-key 2>/dev/null"
   refute_output --partial "Bitwarden Login"
-  refute_output --partial "Primary SSH Key"
+  refute_output --partial "Recovery SSH Key"
 }
 
 # ── all ──────────────────────────────────────────────────────────────────────
 
-@test "all: runs login + github + git identity + dotfiles" {
+@test "all: runs login + github + dotfiles" {
   mock_bw_status unauthenticated
-  mock_jq_sequence "unauthenticated" "-----BEGIN OPENSSH PRIVATE KEY-----" "Test User" "test@example.com"
+  mock_jq_sequence "unauthenticated" "-----BEGIN OPENSSH PRIVATE KEY-----"
   mock_cmd git 0
   mock_cmd chezmoi 0
   run bash "$BOOTSTRAP" all
   assert_success
   assert_output --partial "BW_SESSION exported"
   assert_output --partial "GitHub SSH key saved"
-  assert_output --partial "Git identity configured"
   assert_output --partial "Dotfiles applied"
   assert_output --partial "Bootstrap complete."
+  refute_output --partial "Git identity"
   refute_output --partial "Primary SSH key"
 }
 
@@ -106,7 +105,6 @@ setup() {
 
 @test "status: runs without errors and shows system status" {
   mock_cmd hostname 0 "int-test-box"
-  mock_git_identity "Test User" "test@example.com"
   run bash "$BOOTSTRAP" status
   assert_success
   assert_output --partial "System Status"

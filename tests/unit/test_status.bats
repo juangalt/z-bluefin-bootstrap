@@ -18,7 +18,6 @@ mock_hostname() {
 
 @test "status: shows hostname" {
   mock_hostname "test-box"
-  mock_git_identity "" ""
   run cmd_status
   assert_success
   assert_output --partial "Hostname: test-box"
@@ -28,7 +27,6 @@ mock_hostname() {
 
 @test "status: shows tailscale running with hostname" {
   mock_hostname "test-box"
-  mock_git_identity "" ""
   # Mock tailscale to return JSON
   {
     printf '#!/usr/bin/env bash\n'
@@ -44,7 +42,6 @@ mock_hostname() {
 
 @test "status: warns when tailscale is not installed" {
   mock_hostname "test-box"
-  mock_git_identity "" ""
   # Ensure tailscale is not on PATH — restrict to MOCK_BIN only
   local saved_path="$PATH"
   export PATH="$MOCK_BIN"
@@ -56,7 +53,6 @@ mock_hostname() {
 
 @test "status: warns when tailscale is installed but not running" {
   mock_hostname "test-box"
-  mock_git_identity "" ""
   mock_cmd tailscale 1
   run cmd_status
   assert_success
@@ -67,7 +63,6 @@ mock_hostname() {
 
 @test "status: shows ok when github key exists with 600 permissions" {
   mock_hostname "test-box"
-  mock_git_identity "" ""
   mkdir -p "$HOME/.ssh"
   touch "$HOME/.ssh/github"
   chmod 600 "$HOME/.ssh/github"
@@ -79,7 +74,6 @@ mock_hostname() {
 
 @test "status: warns when github key is missing" {
   mock_hostname "test-box"
-  mock_git_identity "" ""
   run cmd_status
   assert_success
   assert_output --partial "GitHub SSH key not installed"
@@ -87,7 +81,6 @@ mock_hostname() {
 
 @test "status: warns when github key has wrong permissions" {
   mock_hostname "test-box"
-  mock_git_identity "" ""
   mkdir -p "$HOME/.ssh"
   touch "$HOME/.ssh/github"
   chmod 644 "$HOME/.ssh/github"
@@ -97,28 +90,94 @@ mock_hostname() {
   assert_output --partial "expected 600"
 }
 
-# ── Git identity ────────────────────────────────────────────────────────────
+# ── SSH config ─────────────────────────────────────────────────────────────
 
-@test "status: shows ok when git identity is configured" {
+@test "status: shows ok when ssh config has github.com entry" {
   mock_hostname "test-box"
-  mock_git_identity "Test User" "test@example.com"
+  mkdir -p "$HOME/.ssh"
+  printf 'Host github.com\n  IdentityFile ~/.ssh/github\n' > "$HOME/.ssh/config"
   run cmd_status
   assert_success
-  assert_output --partial "Git identity: Test User <test@example.com>"
+  assert_output --partial "SSH config has github.com entry"
 }
 
-@test "status: warns when git identity is not configured" {
+@test "status: warns when ssh config has no github.com entry" {
   mock_hostname "test-box"
-  mock_git_identity "" ""
   run cmd_status
   assert_success
-  assert_output --partial "Git identity not configured"
+  assert_output --partial "No github.com entry"
 }
 
-@test "status: warns when git identity is partially configured" {
+# ── chezmoi drift ──────────────────────────────────────────────────────────
+
+@test "status: shows ok when chezmoi reports no drift" {
   mock_hostname "test-box"
-  mock_git_identity "Test User" ""
+  mock_cmd chezmoi 0 ""
   run cmd_status
   assert_success
-  assert_output --partial "partially configured"
+  assert_output --partial "chezmoi installed"
+  assert_output --partial "all managed files in sync"
 }
+
+@test "status: warns when chezmoi reports drift" {
+  mock_hostname "test-box"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'if [[ "$1" == "status" ]]; then\n'
+    printf '  printf "MM .gitconfig\\n M .claude\\n"\n'
+    printf '  exit 0\n'
+    printf 'fi\n'
+  } > "$MOCK_BIN/chezmoi"
+  chmod +x "$MOCK_BIN/chezmoi"
+  run cmd_status
+  assert_success
+  assert_output --partial "2 file(s) out of sync"
+}
+
+# ── Brew bundle check ──────────────────────────────────────────────────────
+
+@test "status: shows ok when all brew packages installed" {
+  mock_hostname "test-box"
+  mock_cmd brew 0
+  mkdir -p "$DOTFILES_DIR"
+  touch "$DOTFILES_DIR/Brewfile"
+  run cmd_status
+  assert_success
+  assert_output --partial "Brewfile: all packages installed"
+}
+
+@test "status: warns when brew packages are missing" {
+  mock_hostname "test-box"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'printf "brew bundle can'"'"'t satisfy your Brewfile'"'"'s dependencies.\\n"\n'
+    printf 'printf "→ Formula ansible-lint needs to be installed.\\n"\n'
+    printf 'printf "→ Cask claude-code needs to be installed.\\n"\n'
+    printf 'exit 1\n'
+  } > "$MOCK_BIN/brew"
+  chmod +x "$MOCK_BIN/brew"
+  mkdir -p "$DOTFILES_DIR"
+  touch "$DOTFILES_DIR/Brewfile"
+  run cmd_status
+  assert_success
+  assert_output --partial "2 package(s) missing"
+}
+
+@test "status: warns when brew is not installed" {
+  mock_hostname "test-box"
+  local saved_path="$PATH"
+  export PATH="$MOCK_BIN"
+  run cmd_status
+  export PATH="$saved_path"
+  assert_success
+  assert_output --partial "Homebrew not installed"
+}
+
+@test "status: skips brew check when Brewfile is absent" {
+  mock_hostname "test-box"
+  mock_cmd brew 0
+  run cmd_status
+  assert_success
+  refute_output --partial "Brewfile"
+}
+

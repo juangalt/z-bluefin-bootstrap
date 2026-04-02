@@ -67,27 +67,6 @@ mock_jq_value() {
   chmod +x "$MOCK_BIN/jq"
 }
 
-# Write a git mock that responds to `config --global user.name/email` queries.
-# Usage: mock_git_identity NAME EMAIL
-# Pass empty strings for missing values (exits 1 for that query).
-mock_git_identity() {
-  local name="$1" email="$2"
-  {
-    printf '#!/usr/bin/env bash\n'
-    if [[ -n "$name" ]]; then
-      printf 'if [[ "$*" == *"user.name"* ]]; then printf "%%s\\n" %q; ' "$name"
-    else
-      printf 'if [[ "$*" == *"user.name"* ]]; then exit 1; '
-    fi
-    if [[ -n "$email" ]]; then
-      printf 'elif [[ "$*" == *"user.email"* ]]; then printf "%%s\\n" %q; fi\n' "$email"
-    else
-      printf 'elif [[ "$*" == *"user.email"* ]]; then exit 1; fi\n'
-    fi
-  } > "$MOCK_BIN/git"
-  chmod +x "$MOCK_BIN/git"
-}
-
 # Write a jq mock that returns values in sequence based on call count.
 # Usage: mock_jq_sequence VALUE1 VALUE2 ...
 # The last value is used for all subsequent calls beyond the count.
