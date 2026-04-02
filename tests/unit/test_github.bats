@@ -104,3 +104,29 @@ setup() {
   assert_success
   [[ "$(cat "$HOME/.ssh/github")" == "NEW-KEY-CONTENT" ]]
 }
+
+# ── SSH config tests ────────────────────────────────────────────────────────
+
+@test "save_github_key: creates ssh config with github.com entry" {
+  mock_bw_status unlocked
+  mock_jq_value "-----BEGIN OPENSSH PRIVATE KEY-----"
+  export BW_SESSION="fake"
+  run save_github_key
+  assert_success
+  assert_output --partial "SSH config updated"
+  [[ -f "$HOME/.ssh/config" ]]
+  grep -q "Host github.com" "$HOME/.ssh/config"
+  grep -q "IdentityFile ~/.ssh/github" "$HOME/.ssh/config"
+  [[ "$(stat -c '%a' "$HOME/.ssh/config")" == "600" ]]
+}
+
+@test "save_github_key: skips ssh config if github.com entry already exists" {
+  mock_bw_status unlocked
+  mock_jq_value "-----BEGIN OPENSSH PRIVATE KEY-----"
+  export BW_SESSION="fake"
+  mkdir -p "$HOME/.ssh"
+  printf 'Host github.com\n  IdentityFile ~/.ssh/github\n' > "$HOME/.ssh/config"
+  run save_github_key
+  assert_success
+  refute_output --partial "SSH config updated"
+}

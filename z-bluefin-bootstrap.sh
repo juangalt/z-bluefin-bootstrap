@@ -87,6 +87,13 @@ save_github_key() {
   mkdir -p "$HOME/.ssh"
   (umask 077; printf '%s\n' "$key" > "$HOME/.ssh/github")
   ok "GitHub SSH key saved to ~/.ssh/github"
+
+  # Ensure SSH uses this key for github.com without needing ssh-agent
+  local ssh_config="$HOME/.ssh/config"
+  if ! grep -q "Host github.com" "$ssh_config" 2>/dev/null; then
+    (umask 077; printf '\nHost github.com\n  IdentityFile ~/.ssh/github\n' >> "$ssh_config")
+    ok "SSH config updated for github.com"
+  fi
 }
 
 configure_git_identity() {
