@@ -9,11 +9,12 @@
 The only executable is `z-bluefin-bootstrap.sh`. Commands:
 
 ```bash
-./z-bluefin-bootstrap.sh github                         # Log in + save GitHub SSH key + configure git identity
-./z-bluefin-bootstrap.sh primary                        # Log in + load primary key into ssh-agent
-eval "$(./z-bluefin-bootstrap.sh primary)"              # Same, with ssh-agent vars in host shell
+./z-bluefin-bootstrap.sh status                         # Check current state
+./z-bluefin-bootstrap.sh set-hostname my-laptop         # Set system hostname
+./z-bluefin-bootstrap.sh github                         # Save GitHub SSH key + configure git identity
 ./z-bluefin-bootstrap.sh dotfiles                       # Clone z-bluefin-dotfiles + chezmoi apply
-eval "$(./z-bluefin-bootstrap.sh all)"                  # Run github + primary + dotfiles with env export
+./z-bluefin-bootstrap.sh all                            # Run github + dotfiles in one shot
+eval "$(./z-bluefin-bootstrap.sh primary)"              # Optional: load primary key into ssh-agent
 ```
 
 ## Key design constraints
@@ -21,7 +22,7 @@ eval "$(./z-bluefin-bootstrap.sh all)"                  # Run github + primary +
 - Each command handles Bitwarden login internally — no separate login step.
 - **GitHub key is written to disk** at `~/.ssh/github` with 600 permissions.
 - **Primary key is never written to disk** — loaded into ssh-agent only.
-- `primary` and `all` auto-detect eval mode (non-TTY stdout) and export ssh-agent variables.
+- `primary` auto-detects eval mode (non-TTY stdout) and exports ssh-agent variables.
 - **Dotfiles** are cloned from `git@github.com:juangalt/z-bluefin-dotfiles.git` to `~/z-bluefin-dotfiles` and applied via `chezmoi init --source ... --apply`.
 - `chezmoi` is auto-installed via `brew` if missing.
 

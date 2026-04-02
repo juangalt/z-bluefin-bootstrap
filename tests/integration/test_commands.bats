@@ -87,24 +87,19 @@ setup() {
 
 # ── all ──────────────────────────────────────────────────────────────────────
 
-@test "all: runs login + github + git identity + primary + dotfiles and exports vars" {
+@test "all: runs login + github + git identity + dotfiles" {
   mock_bw_status unauthenticated
-  mock_jq_sequence "unauthenticated" "-----BEGIN OPENSSH PRIVATE KEY-----" "Test User" "test@example.com" "-----BEGIN OPENSSH PRIVATE KEY-----"
-  mock_cmd ssh-add 0
+  mock_jq_sequence "unauthenticated" "-----BEGIN OPENSSH PRIVATE KEY-----" "Test User" "test@example.com"
   mock_cmd git 0
   mock_cmd chezmoi 0
-  mock_ssh_agent
-  # run captures stdout (non-TTY), so auto-detect triggers eval mode;
-  # progress goes to stderr which run also captures
   run bash "$BOOTSTRAP" all
   assert_success
   assert_output --partial "BW_SESSION exported"
   assert_output --partial "GitHub SSH key saved"
   assert_output --partial "Git identity configured"
-  assert_output --partial "Primary SSH key loaded"
   assert_output --partial "Dotfiles applied"
-  assert_output --partial "export BW_SESSION="
-  assert_output --partial "hash -r"
+  assert_output --partial "Bootstrap complete."
+  refute_output --partial "Primary SSH key"
 }
 
 # ── status ────────────────────────────────────────────────────────────────
@@ -162,19 +157,3 @@ setup() {
   assert_output --partial "Dotfiles applied"
 }
 
-# ── all ──────────────────────────────────────────────────────────────────────
-
-@test "all: eval mode sends progress to stderr only" {
-  mock_bw_status unauthenticated
-  mock_jq_sequence "unauthenticated" "-----BEGIN OPENSSH PRIVATE KEY-----" "Test User" "test@example.com" "-----BEGIN OPENSSH PRIVATE KEY-----"
-  mock_cmd ssh-add 0
-  mock_cmd git 0
-  mock_cmd chezmoi 0
-  mock_ssh_agent
-  run bash -c "bash '$BOOTSTRAP' all 2>/dev/null"
-  assert_success
-  assert_output --partial "export BW_SESSION="
-  assert_output --partial "hash -r"
-  refute_output --partial "Bitwarden Login"
-  refute_output --partial "GitHub SSH key saved"
-}

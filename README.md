@@ -2,32 +2,32 @@
 
 Bluefin laptop bootstrap — provisions SSH keys via Bitwarden, sets hostname, and recovers dotfiles from [z-bluefin-dotfiles](https://github.com/juangalt/z-bluefin-dotfiles).
 
-## Usage
+## Quick start
 
 ```bash
-# Provision GitHub SSH key + git identity
+# Step by step:
+./z-bluefin-bootstrap.sh status
+./z-bluefin-bootstrap.sh set-hostname my-laptop
 ./z-bluefin-bootstrap.sh github
-
-# Load primary SSH key into ssh-agent
-eval "$(./z-bluefin-bootstrap.sh primary)"
-
-# Clone and apply dotfiles with chezmoi
 ./z-bluefin-bootstrap.sh dotfiles
 
-# Do everything at once
-eval "$(./z-bluefin-bootstrap.sh all)"
+# Or all at once:
+./z-bluefin-bootstrap.sh all
+
+# Optional — load primary SSH key into agent:
+eval "$(./z-bluefin-bootstrap.sh primary)"
 ```
 
 ## Commands
 
 | Command | Description |
 |---|---|
-| `github` | Log in + save GitHub SSH key + configure git identity |
-| `primary` | Log in + load primary SSH key into ssh-agent (never on disk) |
+| `status` | Show current state (hostname, SSH keys, dotfiles, git) |
+| `set-hostname <name>` | Set the system hostname via hostnamectl |
+| `github` | Save GitHub SSH key to `~/.ssh/github` + configure git identity |
 | `dotfiles` | Clone z-bluefin-dotfiles and apply with chezmoi |
-| `all` | Run github + primary + dotfiles in sequence |
-| `status` | Show system status (hostname, tailscale, SSH keys, dotfiles) |
-| `set-hostname NAME` | Set the system hostname via hostnamectl |
+| `all` | Run github + dotfiles in one shot |
+| `primary` | Load primary SSH key into ssh-agent (optional, needs eval) |
 | `help` | Show usage |
 
 ## Requirements

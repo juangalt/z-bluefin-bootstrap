@@ -171,28 +171,32 @@ clone_and_apply_dotfiles() {
 # ── Command functions ─────────────────────────────────────────────────────────
 
 cmd_help() {
-  cat <<EOF
-z-bluefin-bootstrap.sh — Bluefin laptop bootstrap
-
-Usage: z-bluefin-bootstrap.sh <command>
-
-Commands:
-  github            Log in + save GitHub SSH key + configure git identity
-  primary           Log in + load primary SSH key into ssh-agent (never on disk)
-  dotfiles          Clone z-bluefin-dotfiles and apply with chezmoi
-  all               Run github + primary + dotfiles in sequence
-  status            Show system status (hostname, tailscale, SSH keys, dotfiles)
-  set-hostname NAME Set the system hostname via hostnamectl
-  help              Show this help
-
-If run inside eval, primary and all auto-export ssh-agent variables.
-
-Examples:
-  ./z-bluefin-bootstrap.sh github
-  ./z-bluefin-bootstrap.sh primary
-  eval "\$(./z-bluefin-bootstrap.sh primary)"
-  eval "\$(./z-bluefin-bootstrap.sh all)"
-EOF
+  echo -e "${BOLD}z-bluefin-bootstrap.sh${RESET} — Bluefin laptop bootstrap"
+  echo
+  echo -e "${BOLD}Usage:${RESET} z-bluefin-bootstrap.sh <command>"
+  echo
+  echo -e "${BOLD}Commands${RESET} ${DIM}(in typical setup order)${RESET}"
+  echo -e "  ${BOLD}status${RESET}              Show current state (hostname, SSH keys, dotfiles, git)"
+  echo -e "  ${BOLD}set-hostname${RESET} <name> Set the system hostname via hostnamectl"
+  echo -e "  ${BOLD}github${RESET}              Save GitHub SSH key to ~/.ssh/github + configure git identity"
+  echo -e "  ${BOLD}dotfiles${RESET}            Clone z-bluefin-dotfiles and apply with chezmoi"
+  echo -e "  ${BOLD}all${RESET}                 Run github + dotfiles in one shot"
+  echo -e "  ${BOLD}primary${RESET}             Load primary SSH key into ssh-agent ${DIM}(optional, needs eval)${RESET}"
+  echo -e "  ${BOLD}help${RESET}                Show this help"
+  echo
+  echo -e "Each command handles Bitwarden login/unlock automatically."
+  echo
+  echo -e "${BOLD}Quick start${RESET}"
+  echo -e "  ./z-bluefin-bootstrap.sh status"
+  echo -e "  ./z-bluefin-bootstrap.sh set-hostname my-laptop"
+  echo -e "  ./z-bluefin-bootstrap.sh github"
+  echo -e "  ./z-bluefin-bootstrap.sh dotfiles"
+  echo
+  echo -e "  ${DIM}# Or all at once:${RESET}"
+  echo -e "  ./z-bluefin-bootstrap.sh all"
+  echo
+  echo -e "  ${DIM}# Optional — load primary SSH key into agent:${RESET}"
+  echo -e "  eval \"\$(./z-bluefin-bootstrap.sh primary)\""
 }
 
 cmd_status() {
@@ -292,8 +296,6 @@ _run_all_steps() {
   save_github_key
   header "Git Identity"
   configure_git_identity
-  header "Primary SSH Key"
-  load_primary_key
   header "Dotfiles"
   clone_and_apply_dotfiles
 }
@@ -329,18 +331,9 @@ cmd_primary() {
 }
 
 cmd_all() {
-  local had_agent=$([[ -n "${SSH_AUTH_SOCK:-}" ]] && echo yes || true)
-
-  if [[ ! -t 1 ]]; then
-    _run_all_steps >&2
-    printf 'export BW_SESSION=%q\n' "$BW_SESSION"
-    _emit_agent_exports
-  else
-    _run_all_steps
-    echo
-    ok "Bootstrap complete."
-    _warn_agent_subprocess all "$had_agent"
-  fi
+  _run_all_steps
+  echo
+  ok "Bootstrap complete."
 }
 
 # ── Main dispatcher ───────────────────────────────────────────────────────────
@@ -349,13 +342,13 @@ main() {
   local cmd="${1:-help}"
   shift || true
   case "$cmd" in
-    help|--help|-h) cmd_help ;;
-    github)         cmd_github "$@" ;;
-    primary)        cmd_primary "$@" ;;
-    dotfiles)       cmd_dotfiles "$@" ;;
-    all)            cmd_all "$@" ;;
     status)         cmd_status "$@" ;;
     set-hostname)   cmd_set_hostname "$@" ;;
+    github)         cmd_github "$@" ;;
+    dotfiles)       cmd_dotfiles "$@" ;;
+    all)            cmd_all "$@" ;;
+    primary)        cmd_primary "$@" ;;
+    help|--help|-h) cmd_help ;;
     *)              err "Unknown command: ${cmd}"; echo; cmd_help; exit 1 ;;
   esac
 }
