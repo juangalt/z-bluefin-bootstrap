@@ -20,6 +20,8 @@ setup() {
   assert_output --partial "install dotfiles"
   assert_output --partial "install packages"
   assert_output --partial "install all"
+  assert_output --partial "push packages"
+  assert_output --partial "push dotfiles"
   assert_output --partial "recovery-key"
 }
 
@@ -36,6 +38,18 @@ setup() {
 }
 
 # ── install ──────────────────────────────────────────────────────────────────
+
+@test "push: no subcommand shows usage" {
+  run bash "$BOOTSTRAP" push
+  assert_failure
+  assert_output --partial "Usage:"
+}
+
+@test "push: unknown subcommand shows usage" {
+  run bash "$BOOTSTRAP" push bogus
+  assert_failure
+  assert_output --partial "Usage:"
+}
 
 @test "install: no subcommand shows usage" {
   run bash "$BOOTSTRAP" install

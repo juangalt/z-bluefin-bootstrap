@@ -39,7 +39,12 @@ require_bw_session() {
 
 bw_login_or_unlock() {
   header "Bitwarden Login"
-  require bw
+  if ! have bw; then
+    require brew
+    info "Installing Bitwarden CLI..."
+    brew install bitwarden-cli || die "Failed to install bitwarden-cli"
+    ok "Bitwarden CLI installed"
+  fi
   require jq
 
   local bw_st
@@ -157,6 +162,125 @@ install_packages() {
   ok "All packages installed"
 }
 
+confirm_or_abort() {
+  local prompt="${1:-Continue?}"
+  read -rp "  $prompt [y/N] " answer
+  [[ "$answer" =~ ^[Yy]$ ]] || { info "Aborted."; return 1; }
+}
+
+git_commit_and_push() {
+  local message="$1"
+  require git
+
+  git -C "$DOTFILES_DIR" add -A || die "git add failed"
+
+  if git -C "$DOTFILES_DIR" diff --cached --quiet; then
+    info "No changes to commit in dotfiles repo"
+    return 0
+  fi
+
+  git -C "$DOTFILES_DIR" commit -m "$message" || die "git commit failed"
+  ok "Committed: $message"
+
+  git -C "$DOTFILES_DIR" push || die "git push failed"
+  ok "Pushed to remote"
+}
+
+push_packages() {
+  require brew
+
+  local brewfile="$DOTFILES_DIR/Brewfile"
+  [[ -f "$brewfile" ]] || die "Brewfile not found at $brewfile — run 'install dotfiles' first"
+
+  local tmpfile
+  tmpfile=$(mktemp)
+
+  info "Dumping current packages to temp Brewfile..."
+  if ! brew bundle dump --file="$tmpfile" --force; then
+    rm -f "$tmpfile"
+    die "brew bundle dump failed"
+  fi
+
+  local diff_output
+  if diff_output=$(diff -u --label "current Brewfile" --label "new Brewfile" "$brewfile" "$tmpfile"); then
+    rm -f "$tmpfile"
+    ok "Brewfile already in sync"
+    return 0
+  fi
+
+  echo
+  printf '%s\n' "$diff_output"
+  echo
+  if ! confirm_or_abort "Update Brewfile?"; then
+    rm -f "$tmpfile"
+    return 0
+  fi
+
+  cp "$tmpfile" "$brewfile"
+  rm -f "$tmpfile"
+  ok "Brewfile updated"
+
+  git_commit_and_push "push packages: update Brewfile"
+}
+
+push_dotfiles() {
+  require chezmoi
+
+  [[ -d "$DOTFILES_DIR" ]] || die "Dotfiles repo not found at $DOTFILES_DIR — run 'install dotfiles' first"
+
+  local diff_output
+  diff_output=$(chezmoi diff --reverse 2>&1) \
+    || die "chezmoi diff failed"
+
+  if [[ -z "$diff_output" ]]; then
+    ok "Dotfiles already in sync"
+    return 0
+  fi
+
+  echo
+  printf '%s\n' "$diff_output"
+  echo
+  # Detect template files — chezmoi re-add skips them.
+  # chezmoi status outputs "XY <path>" where XY is a two-char status code
+  # and <path> is relative to the target dir (home). $NF extracts the path.
+  local changed_files template_files non_template_count src
+  changed_files=$(chezmoi status | awk '{print $NF}')
+  template_files=""
+  non_template_count=0
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    src=$(chezmoi source-path "$HOME/$f" 2>/dev/null) || continue
+    if [[ "$src" == *.tmpl ]]; then
+      template_files+="  $f"$'\n'
+    else
+      non_template_count=$((non_template_count + 1))
+    fi
+  done <<< "$changed_files"
+
+  if [[ "$non_template_count" -eq 0 && -n "$template_files" ]]; then
+    warn "All changed files are templates — chezmoi re-add cannot update them"
+    info "Edit the .tmpl source files in $DOTFILES_DIR, then re-run to push"
+    # Offer to commit+push any manual edits already in the dotfiles repo.
+    # git_commit_and_push handles the no-op case (nothing to commit).
+    confirm_or_abort "Push pending changes in dotfiles repo?" \
+      && git_commit_and_push "push dotfiles: update templates"
+    return 0
+  fi
+
+  confirm_or_abort "Re-add these files?" || return 0
+
+  if [[ -n "$template_files" ]]; then
+    warn "These template files will be skipped by re-add:"
+    printf '%s' "$template_files"
+    info "Update them manually in $DOTFILES_DIR if needed"
+  fi
+
+  chezmoi re-add || die "chezmoi re-add failed"
+  ok "chezmoi source updated"
+
+  git_commit_and_push "push dotfiles: re-add managed files"
+}
+
 # ── Command functions ─────────────────────────────────────────────────────────
 
 cmd_help() {
@@ -171,6 +295,8 @@ cmd_help() {
   echo -e "  ${CYAN}install dotfiles${RESET}      Clone z-bluefin-dotfiles and apply config files with chezmoi"
   echo -e "  ${CYAN}install packages${RESET}      Install brew packages and flatpaks from Brewfile"
   echo -e "  ${CYAN}install all${RESET}           Run github-key + dotfiles + packages in one shot ${DIM}(requires Bitwarden)${RESET}"
+  echo -e "  ${CYAN}push packages${RESET}         Dump current brew/flatpak state to Brewfile and push"
+  echo -e "  ${CYAN}push dotfiles${RESET}         Re-add local dotfile changes to chezmoi source and push"
   echo -e "  ${CYAN}recovery-key${RESET}          Load recovery SSH key into ssh-agent ${DIM}(needs eval, see below)${RESET}"
   echo -e "  ${CYAN}help${RESET}                  Show this help"
   echo
@@ -185,6 +311,10 @@ cmd_help() {
   echo
   echo -e "  ${DIM}# Or all at once:${RESET}"
   echo -e "  ./z-bluefin-bootstrap.sh ${CYAN}install all${RESET}"
+  echo
+  echo -e "  ${DIM}# Push local changes back to dotfiles repo:${RESET}"
+  echo -e "  ./z-bluefin-bootstrap.sh ${CYAN}push dotfiles${RESET}"
+  echo -e "  ./z-bluefin-bootstrap.sh ${CYAN}push packages${RESET}"
   echo
   echo -e "  ${DIM}# Load recovery SSH key into agent:${RESET}"
   echo -e "  eval \"\$(./z-bluefin-bootstrap.sh ${CYAN}recovery-key${RESET})\""
@@ -257,10 +387,24 @@ cmd_status() {
     if [[ "$drift" -eq 0 ]]; then
       ok "chezmoi: all managed files in sync"
     else
-      warn "chezmoi: ${drift} file(s) out of sync — run 'install dotfiles' to re-apply"
+      warn "chezmoi: ${drift} file(s) out of sync — run 'push dotfiles' or 'install dotfiles'"
     fi
   else
     warn "chezmoi not installed"
+  fi
+  if [[ -d "$DOTFILES_DIR/.git" ]]; then
+    local uncommitted unpushed
+    uncommitted=$(git -C "$DOTFILES_DIR" status --porcelain 2>/dev/null | grep -c '.' || true)
+    unpushed=$(git -C "$DOTFILES_DIR" log --oneline '@{upstream}..HEAD' 2>/dev/null | grep -c '.' || true)
+    if [[ "$uncommitted" -gt 0 ]]; then
+      warn "dotfiles repo: ${uncommitted} uncommitted change(s)"
+    fi
+    if [[ "$unpushed" -gt 0 ]]; then
+      warn "dotfiles repo: ${unpushed} unpushed commit(s)"
+    fi
+    if [[ "$uncommitted" -eq 0 && "$unpushed" -eq 0 ]]; then
+      ok "dotfiles repo: clean and up to date with remote"
+    fi
   fi
 
   header "Packages"
@@ -276,6 +420,9 @@ cmd_status() {
         local missing
         missing=$(printf '%s\n' "$brew_output" | grep -c '^→' || true)
         warn "Brewfile: ${missing} package(s) missing — run 'install packages' to install"
+      fi
+      if ! brew bundle cleanup --file="$brewfile" >/dev/null; then
+        warn "Brewfile: extra packages installed locally — run 'push packages' to update"
       fi
     fi
   else
@@ -337,6 +484,26 @@ cmd_install() {
   esac
 }
 
+cmd_push_packages() {
+  header "Push Packages"
+  push_packages
+}
+
+cmd_push_dotfiles() {
+  header "Push Dotfiles"
+  push_dotfiles
+}
+
+cmd_push() {
+  local subcmd="${1:-}"
+  shift || true
+  case "$subcmd" in
+    packages) cmd_push_packages "$@" ;;
+    dotfiles) cmd_push_dotfiles "$@" ;;
+    *)        die "Usage: z-bluefin-bootstrap.sh push {packages|dotfiles}" ;;
+  esac
+}
+
 _run_recovery_key_steps() {
   bw_login_or_unlock
   header "Recovery SSH Key"
@@ -382,6 +549,7 @@ main() {
     status)         cmd_status "$@" ;;
     set-hostname)   cmd_set_hostname "$@" ;;
     install)        cmd_install "$@" ;;
+    push)           cmd_push "$@" ;;
     recovery-key)   cmd_recovery_key "$@" ;;
     help|--help|-h) cmd_help ;;
     *)              err "Unknown command: ${cmd}"; echo; cmd_help; exit 1 ;;

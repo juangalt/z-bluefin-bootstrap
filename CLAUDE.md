@@ -19,6 +19,8 @@ The only executable is `z-bluefin-bootstrap.sh`. Commands:
 ./z-bluefin-bootstrap.sh install dotfiles               # Clone z-bluefin-dotfiles + chezmoi apply
 ./z-bluefin-bootstrap.sh install packages               # Install brew packages + flatpaks from Brewfile
 ./z-bluefin-bootstrap.sh install all                    # Run github-key + dotfiles + packages in one shot
+./z-bluefin-bootstrap.sh push packages                  # Dump current brew/flatpak state to Brewfile and push
+./z-bluefin-bootstrap.sh push dotfiles                  # Re-add local dotfile changes to chezmoi source and push
 eval "$(./z-bluefin-bootstrap.sh recovery-key)"         # Load recovery key into ssh-agent
 ```
 

@@ -88,6 +88,68 @@ mock_jq_sequence() {
   chmod +x "$MOCK_BIN/jq"
 }
 
+# Write a git mock that handles -C <dir> <subcmd> dispatch for push operations.
+# $1 = "changes" (git diff --cached exits 1, i.e. staged changes exist) or "clean" (exits 0)
+# Capture file: $BATS_TEST_TMPDIR/git.calls
+mock_git_for_push() {
+  local has_changes="${1:-changes}"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'printf "%%s\\n" "$*" >> %q\n' "$BATS_TEST_TMPDIR/git.calls"
+    printf 'subcmd="$1"; [[ "$1" == "-C" ]] && subcmd="$3"\n'
+    printf 'case "$subcmd" in\n'
+    printf '  add) exit 0 ;;\n'
+    printf '  diff)\n'
+    if [[ "$has_changes" == "changes" ]]; then
+      printf '    exit 1 ;;\n'
+    else
+      printf '    exit 0 ;;\n'
+    fi
+    printf '  commit) exit 0 ;;\n'
+    printf '  push) exit 0 ;;\n'
+    printf '  *) exit 0 ;;\n'
+    printf 'esac\n'
+  } > "$MOCK_BIN/git"
+  chmod +x "$MOCK_BIN/git"
+}
+
+# Write a git mock for status checks (uncommitted changes + unpushed commits).
+# $1 = porcelain output for `git status` (empty string = clean)
+# $2 = oneline output for `git log` (empty string = no unpushed)
+mock_git_for_status() {
+  local status_output="${1:-}"
+  local log_output="${2:-}"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'subcmd="$1"; [[ "$1" == "-C" ]] && subcmd="$3"\n'
+    printf 'case "$subcmd" in\n'
+    printf '  status) printf "%%s" %q ;;\n' "$status_output"
+    printf '  log) printf "%%s" %q ;;\n' "$log_output"
+    printf '  *) exit 0 ;;\n'
+    printf 'esac\n'
+  } > "$MOCK_BIN/git"
+  chmod +x "$MOCK_BIN/git"
+}
+
+# Write a brew mock for status checks (bundle check + bundle cleanup).
+# $1 = exit code for `brew bundle check` (0 = all installed, 1 = missing)
+# $2 = exit code for `brew bundle cleanup` (0 = no extras, 1 = extras found)
+# $3 = stdout for `brew bundle cleanup` when extras found (optional)
+mock_brew_for_status() {
+  local check_rc="${1:-0}" cleanup_rc="${2:-0}" cleanup_output="${3:-}"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'case "$2" in\n'
+    printf '  check) exit %s ;;\n' "$check_rc"
+    printf '  cleanup)\n'
+    [[ -n "$cleanup_output" ]] && printf '    printf "%%s\\n" %q\n' "$cleanup_output"
+    printf '    exit %s ;;\n' "$cleanup_rc"
+    printf '  *) exit 0 ;;\n'
+    printf 'esac\n'
+  } > "$MOCK_BIN/brew"
+  chmod +x "$MOCK_BIN/brew"
+}
+
 # Write an ssh-agent mock that emits eval-able export lines.
 mock_ssh_agent() {
   {

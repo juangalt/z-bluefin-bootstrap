@@ -11,14 +11,27 @@ setup() {
 
 # ── Tool-absent tests ─────────────────────────────────────────────────────────
 
-@test "bw_login_or_unlock: exits 1 when bw is absent" {
+@test "bw_login_or_unlock: installs bw via brew when absent" {
+  mock_jq_value "unlocked"
+  mock_cmd_capture brew 0
+  # Symlink bash so mock scripts can execute under restricted PATH
+  ln -s "$(command -v bash)" "$MOCK_BIN/bash"
+  local saved_path="$PATH"
+  export PATH="$MOCK_BIN"
+  run bw_login_or_unlock
+  export PATH="$saved_path"
+  [[ -f "$BATS_TEST_TMPDIR/brew.calls" ]]
+  grep -q "install bitwarden-cli" "$BATS_TEST_TMPDIR/brew.calls"
+}
+
+@test "bw_login_or_unlock: exits 1 when bw and brew are both absent" {
   mock_jq_value "unlocked"
   local saved_path="$PATH"
   export PATH="$MOCK_BIN"
   run bw_login_or_unlock
   export PATH="$saved_path"
   assert_failure
-  assert_output --partial "Required tool not found: bw"
+  assert_output --partial "Required tool not found: brew"
 }
 
 @test "bw_login_or_unlock: exits 1 when jq is absent" {

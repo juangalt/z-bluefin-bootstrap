@@ -181,3 +181,75 @@ mock_hostname() {
   refute_output --partial "Brewfile"
 }
 
+# ── Dotfiles repo git state ──────────────────────────────────────────────────
+
+@test "status: shows dotfiles repo clean when up to date" {
+  mock_hostname "test-box"
+  mock_cmd chezmoi 0 ""
+  mkdir -p "$DOTFILES_DIR/.git"
+  mock_git_for_status "" ""
+  run cmd_status
+  assert_success
+  assert_output --partial "dotfiles repo: clean and up to date with remote"
+}
+
+@test "status: warns when dotfiles repo has uncommitted changes" {
+  mock_hostname "test-box"
+  mock_cmd chezmoi 0 ""
+  mkdir -p "$DOTFILES_DIR/.git"
+  mock_git_for_status " M dot_bashrc
+ M dot_zshrc
+" ""
+  run cmd_status
+  assert_success
+  assert_output --partial "dotfiles repo: 2 uncommitted change(s)"
+}
+
+@test "status: warns when dotfiles repo has unpushed commits" {
+  mock_hostname "test-box"
+  mock_cmd chezmoi 0 ""
+  mkdir -p "$DOTFILES_DIR/.git"
+  mock_git_for_status "" "abc1234 some commit
+"
+  run cmd_status
+  assert_success
+  assert_output --partial "dotfiles repo: 1 unpushed commit(s)"
+}
+
+@test "status: shows both uncommitted and unpushed warnings" {
+  mock_hostname "test-box"
+  mock_cmd chezmoi 0 ""
+  mkdir -p "$DOTFILES_DIR/.git"
+  mock_git_for_status " M dot_bashrc
+" "abc1234 some commit
+"
+  run cmd_status
+  assert_success
+  assert_output --partial "1 uncommitted change(s)"
+  assert_output --partial "1 unpushed commit(s)"
+  refute_output --partial "clean and up to date"
+}
+
+# ── Extra brew packages ──────────────────────────────────────────────────────
+
+@test "status: warns when extra brew packages are installed" {
+  mock_hostname "test-box"
+  mock_brew_for_status 0 1 "cowsay
+fortune"
+  mkdir -p "$DOTFILES_DIR"
+  touch "$DOTFILES_DIR/Brewfile"
+  run cmd_status
+  assert_success
+  assert_output --partial "extra packages installed locally"
+}
+
+@test "status: no extra packages warning when none" {
+  mock_hostname "test-box"
+  mock_brew_for_status 0 0
+  mkdir -p "$DOTFILES_DIR"
+  touch "$DOTFILES_DIR/Brewfile"
+  run cmd_status
+  assert_success
+  refute_output --partial "extra packages"
+}
+
