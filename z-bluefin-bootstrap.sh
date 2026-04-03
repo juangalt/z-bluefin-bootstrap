@@ -207,10 +207,10 @@ classify_chezmoi_drift() {
 
   [[ -z "$status_output" ]] && return 1
 
-  local changed_files f src
-  changed_files=$(awk '{print $NF}' <<< "$status_output")
-  while IFS= read -r f; do
-    [[ -z "$f" ]] && continue
+  local line f src
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    f="${line:3}"
     src=$(chezmoi source-path "$HOME/$f" 2>/dev/null) || src=""
     if [[ "$src" == *.tmpl ]]; then
       TEMPLATE_FILES+="$f"$'\n'
@@ -219,7 +219,7 @@ classify_chezmoi_drift() {
       NON_TEMPLATE_FILES+="$f"$'\n'
       NON_TEMPLATE_COUNT=$((NON_TEMPLATE_COUNT + 1))
     fi
-  done <<< "$changed_files"
+  done <<< "$status_output"
 }
 
 # Filter unified diff output to show only diffs for files in a given list.
@@ -344,7 +344,7 @@ push_dotfiles() {
 
   if [[ "$TEMPLATE_COUNT" -gt 0 ]]; then
     warn "These template files will be skipped by re-add:"
-    while IFS= read -r f; do [[ -n "$f" ]] && echo "  $f"; done <<< "$TEMPLATE_FILES"
+    while IFS= read -r f; do [[ -n "$f" ]] && echo "  ~/$f"; done <<< "$TEMPLATE_FILES"
   fi
 
   chezmoi re-add || die "chezmoi re-add failed"
@@ -475,7 +475,7 @@ cmd_status() {
       if [[ "$NON_TEMPLATE_COUNT" -gt 0 ]]; then
         warn "chezmoi: ${NON_TEMPLATE_COUNT} file(s) out of sync — run 'push dotfiles' or 'install dotfiles'"
         if [[ "$show_details" == true ]]; then
-          while IFS= read -r f; do [[ -n "$f" ]] && dim "  $f"; done <<< "$NON_TEMPLATE_FILES"
+          while IFS= read -r f; do [[ -n "$f" ]] && dim "  ~/$f"; done <<< "$NON_TEMPLATE_FILES"
         fi
       else
         ok "chezmoi: all managed files in sync"
@@ -483,7 +483,7 @@ cmd_status() {
       if [[ "$TEMPLATE_COUNT" -gt 0 ]]; then
         info "chezmoi: ${TEMPLATE_COUNT} template file(s) differ (expected — edit .tmpl sources in $DOTFILES_DIR to update)"
         if [[ "$show_details" == true ]]; then
-          while IFS= read -r f; do [[ -n "$f" ]] && dim "  $f"; done <<< "$TEMPLATE_FILES"
+          while IFS= read -r f; do [[ -n "$f" ]] && dim "  ~/$f"; done <<< "$TEMPLATE_FILES"
         fi
       fi
     else
