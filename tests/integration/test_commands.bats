@@ -171,6 +171,7 @@ setup() {
 
 @test "install packages: fails when Brewfile missing" {
   mock_cmd brew 0
+  mock_cmd git 0
   run bash "$BOOTSTRAP" install packages
   assert_failure
   assert_output --partial "Brewfile not found"
@@ -178,10 +179,22 @@ setup() {
 
 @test "install packages: installs from Brewfile" {
   mock_cmd brew 0
+  mock_cmd git 0
   mkdir -p "$HOME/z-bluefin-dotfiles"
   touch "$HOME/z-bluefin-dotfiles/Brewfile"
   run bash "$BOOTSTRAP" install packages
   assert_success
+  assert_output --partial "All packages installed"
+}
+
+@test "install packages: warns when github key missing" {
+  mock_cmd brew 0
+  mock_cmd git 0
+  mkdir -p "$HOME/z-bluefin-dotfiles"
+  touch "$HOME/z-bluefin-dotfiles/Brewfile"
+  run bash "$BOOTSTRAP" install packages
+  assert_success
+  assert_output --partial "GitHub SSH key not found"
   assert_output --partial "All packages installed"
 }
 

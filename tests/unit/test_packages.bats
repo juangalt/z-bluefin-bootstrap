@@ -20,8 +20,19 @@ setup() {
   assert_output --partial "Required tool not found: brew"
 }
 
+@test "install_packages: exits 1 when git is absent" {
+  mock_cmd brew 0
+  local saved_path="$PATH"
+  export PATH="$MOCK_BIN"
+  run install_packages
+  export PATH="$saved_path"
+  assert_failure
+  assert_output --partial "Required tool not found: git"
+}
+
 @test "install_packages: exits 1 when Brewfile does not exist" {
   mock_cmd brew 0
+  mock_cmd git 0
   run install_packages
   assert_failure
   assert_output --partial "Brewfile not found"
@@ -29,8 +40,33 @@ setup() {
 
 # ── Install tests ────────────────────────────────────────────────────────────
 
+@test "install_packages: clones dotfiles repo when dir does not exist" {
+  mock_cmd_capture brew 0
+  mock_cmd_capture git 0
+  run install_packages
+  assert_failure
+  assert_output --partial "Cloning dotfiles repo"
+  assert_output --partial "Brewfile not found"
+  [[ -f "$BATS_TEST_TMPDIR/git.calls" ]]
+  grep -q "clone.*z-bluefin-dotfiles" "$BATS_TEST_TMPDIR/git.calls"
+}
+
+@test "install_packages: pulls dotfiles repo when dir already exists" {
+  mock_cmd_capture brew 0
+  mock_cmd_capture git 0
+  mkdir -p "$DOTFILES_DIR"
+  touch "$DOTFILES_DIR/Brewfile"
+  run install_packages
+  assert_success
+  assert_output --partial "pulling latest"
+  assert_output --partial "Dotfiles repo updated"
+  [[ -f "$BATS_TEST_TMPDIR/git.calls" ]]
+  grep -q "\-C.*z-bluefin-dotfiles pull" "$BATS_TEST_TMPDIR/git.calls"
+}
+
 @test "install_packages: runs brew bundle install with correct args" {
   mock_cmd_capture brew 0
+  mock_cmd git 0
   mkdir -p "$DOTFILES_DIR"
   touch "$DOTFILES_DIR/Brewfile"
   run install_packages
@@ -43,6 +79,7 @@ setup() {
 
 @test "install_packages: exits 1 when brew bundle install fails" {
   mock_cmd brew 1
+  mock_cmd git 0
   mkdir -p "$DOTFILES_DIR"
   touch "$DOTFILES_DIR/Brewfile"
   run install_packages

@@ -25,19 +25,25 @@ mock_hostname() {
 
 # ── Tailscale ───────────────────────────────────────────────────────────────
 
-@test "status: shows tailscale running with hostname" {
+@test "status: shows tailscale connected with hostname and account" {
   mock_hostname "test-box"
-  # Mock tailscale to return JSON
-  {
-    printf '#!/usr/bin/env bash\n'
-    printf 'printf '"'"'{"Self":{"HostName":"ts-node"}}'"'"'\n'
-  } > "$MOCK_BIN/tailscale"
-  chmod +x "$MOCK_BIN/tailscale"
-  mock_jq_value "ts-node"
+  mock_cmd tailscale 0 "{}"
+  # jq is called 3 times: BackendState, HostName, CurrentTailnet.Name
+  mock_jq_sequence "Running" "ts-node" "user@example.com"
   run cmd_status
   assert_success
-  assert_output --partial "Tailscale running"
+  assert_output --partial "Tailscale connected"
   assert_output --partial "ts-node"
+  assert_output --partial "user@example.com"
+}
+
+@test "status: warns when tailscale is running but not connected" {
+  mock_hostname "test-box"
+  mock_cmd tailscale 0 "{}"
+  mock_jq_sequence "NeedsLogin" "unknown" "unknown"
+  run cmd_status
+  assert_success
+  assert_output --partial "Tailscale running but not connected to a tailnet"
 }
 
 @test "status: warns when tailscale is not installed" {

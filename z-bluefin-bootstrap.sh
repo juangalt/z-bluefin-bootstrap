@@ -30,6 +30,7 @@ require() {
 # ── Configuration ─────────────────────────────────────────────────────────────
 DOTFILES_REPO="git@github.com:juangalt/z-bluefin-dotfiles.git"
 DOTFILES_DIR="$HOME/z-bluefin-dotfiles"
+GITHUB_KEY_FILE="$HOME/.ssh/github"
 
 # ── Domain functions ──────────────────────────────────────────────────────────
 
@@ -90,7 +91,7 @@ save_github_key() {
   [[ -n "$key" ]] || die "GitHub SSH key is empty — check the Bitwarden item"
 
   mkdir -p "$HOME/.ssh"
-  (umask 077; printf '%s\n' "$key" > "$HOME/.ssh/github")
+  (umask 077; printf '%s\n' "$key" > "$GITHUB_KEY_FILE")
   ok "GitHub SSH key saved to ~/.ssh/github"
 
   # Ensure SSH uses this key for github.com without needing ssh-agent
@@ -125,16 +126,8 @@ load_recovery_key() {
   ok "Recovery SSH key loaded into ssh-agent"
 }
 
-clone_and_apply_dotfiles() {
+ensure_dotfiles_repo() {
   require git
-
-  if ! have chezmoi; then
-    require brew
-    info "Installing chezmoi..."
-    brew install chezmoi || die "Failed to install chezmoi"
-    ok "chezmoi installed"
-  fi
-
   if [[ -d "$DOTFILES_DIR" ]]; then
     info "Dotfiles repo already cloned at $DOTFILES_DIR — pulling latest..."
     git -C "$DOTFILES_DIR" pull || die "git pull failed in $DOTFILES_DIR"
@@ -144,6 +137,17 @@ clone_and_apply_dotfiles() {
     git clone "$DOTFILES_REPO" "$DOTFILES_DIR" || die "git clone failed for $DOTFILES_REPO"
     ok "Dotfiles repo cloned to $DOTFILES_DIR"
   fi
+}
+
+clone_and_apply_dotfiles() {
+  if ! have chezmoi; then
+    require brew
+    info "Installing chezmoi..."
+    brew install chezmoi || die "Failed to install chezmoi"
+    ok "chezmoi installed"
+  fi
+
+  ensure_dotfiles_repo
 
   info "Applying dotfiles with chezmoi..."
   chezmoi init --source "$DOTFILES_DIR" --apply || die "chezmoi init --apply failed"
@@ -152,9 +156,10 @@ clone_and_apply_dotfiles() {
 
 install_packages() {
   require brew
+  ensure_dotfiles_repo
 
   local brewfile="$DOTFILES_DIR/Brewfile"
-  [[ -f "$brewfile" ]] || die "Brewfile not found at $brewfile — run 'install dotfiles' first"
+  [[ -f "$brewfile" ]] || die "Brewfile not found at $brewfile"
 
   info "Installing packages from Brewfile (brew + flatpak)..."
   brew bundle install --file="$brewfile" --no-upgrade \
@@ -340,9 +345,15 @@ cmd_status() {
   if have tailscale; then
     local ts_json
     if ts_json=$(tailscale status --json 2>/dev/null); then
-      local ts_host
+      local ts_state ts_host ts_tailnet
+      ts_state=$(printf '%s' "$ts_json" | jq -r '.BackendState // "unknown"')
       ts_host=$(printf '%s' "$ts_json" | jq -r '.Self.HostName // "unknown"')
-      ok "Tailscale running — hostname: ${ts_host}"
+      ts_tailnet=$(printf '%s' "$ts_json" | jq -r '.CurrentTailnet.Name // "unknown"')
+      if [[ "$ts_state" == "Running" ]]; then
+        ok "Tailscale connected — hostname: ${ts_host}, account: ${ts_tailnet}"
+      else
+        warn "Tailscale running but not connected to a tailnet"
+      fi
     else
       warn "Tailscale installed but not running"
     fi
@@ -353,9 +364,9 @@ cmd_status() {
   header "SSH"
 
   # GitHub SSH key
-  if [[ -f "$HOME/.ssh/github" ]]; then
+  if [[ -f "$GITHUB_KEY_FILE" ]]; then
     local perms
-    perms=$(stat -c '%a' "$HOME/.ssh/github" 2>/dev/null || echo "???")
+    perms=$(stat -c '%a' "$GITHUB_KEY_FILE" 2>/dev/null || echo "???")
     if [[ "$perms" == "600" ]]; then
       ok "GitHub SSH key installed (~/.ssh/github, mode 600)"
     else
@@ -447,15 +458,19 @@ cmd_install_github_key() {
   save_github_key
 }
 
-cmd_install_dotfiles() {
-  if [[ ! -f "$HOME/.ssh/github" ]]; then
+warn_if_no_github_key() {
+  [[ -f "$GITHUB_KEY_FILE" ]] || \
     warn "GitHub SSH key not found — clone may fail. Run 'install github-key' first."
-  fi
+}
+
+cmd_install_dotfiles() {
+  warn_if_no_github_key
   header "Dotfiles"
   clone_and_apply_dotfiles
 }
 
 cmd_install_packages() {
+  warn_if_no_github_key
   header "Packages"
   install_packages
 }
