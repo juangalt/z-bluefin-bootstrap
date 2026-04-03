@@ -9,55 +9,6 @@ setup() {
   load_bootstrap_functions
 }
 
-# Helper: mock chezmoi with configurable diff output and template awareness.
-# $1 = "drift" (non-template), "clean" (no diff), "template-only", "mixed"
-mock_chezmoi_for_push() {
-  local mode="${1:-drift}"
-  {
-    printf '#!/usr/bin/env bash\n'
-    printf 'printf "%%s\\n" "$*" >> %q\n' "$BATS_TEST_TMPDIR/chezmoi.calls"
-    printf 'case "$1" in\n'
-    printf '  diff)\n'
-    case "$mode" in
-      clean)
-        : ;;
-      drift)
-        printf '    printf "diff --git a/.bashrc b/.bashrc\\n--- a/.bashrc\\n+++ b/.bashrc\\n@@ -1 +1,2 @@\\n+export FOO=bar\\n"\n'
-        ;;
-      template-only)
-        printf '    printf "diff --git a/.claude/settings.json b/.claude/settings.json\\n--- a\\n+++ b\\n@@ -1 +1,2 @@\\n+new line\\n"\n'
-        ;;
-      mixed)
-        printf '    printf "diff --git a/.bashrc b/.bashrc\\n--- a\\n+++ b\\n@@ -1 +1,2 @@\\n+export FOO=bar\\ndiff --git a/.claude/settings.json b/.claude/settings.json\\n--- a\\n+++ b\\n@@ -1 +1,2 @@\\n+new line\\n"\n'
-        ;;
-    esac
-    printf '    exit 0 ;;\n'
-    printf '  status)\n'
-    case "$mode" in
-      clean)
-        : ;;
-      drift)
-        printf '    printf "MM .bashrc\\n"\n' ;;
-      template-only)
-        printf '    printf "MM .claude/settings.json\\n"\n' ;;
-      mixed)
-        printf '    printf "MM .bashrc\\nMM .claude/settings.json\\n"\n' ;;
-    esac
-    printf '    exit 0 ;;\n'
-    printf '  source-path)\n'
-    # Return a .tmpl path for .claude/settings.json, plain path for others
-    printf '    case "$2" in\n'
-    printf '      */.claude/settings.json) printf "%%s\\n" "%s/private_dot_claude/settings.json.tmpl" ;;\n' "$DOTFILES_DIR"
-    printf '      *) printf "%%s\\n" "%s/dot_bashrc" ;;\n' "$DOTFILES_DIR"
-    printf '    esac\n'
-    printf '    exit 0 ;;\n'
-    printf '  re-add) exit 0 ;;\n'
-    printf '  *) exit 0 ;;\n'
-    printf 'esac\n'
-  } > "$MOCK_BIN/chezmoi"
-  chmod +x "$MOCK_BIN/chezmoi"
-}
-
 # ── Tool/precondition tests ──────────────────────────────────────────────────
 
 @test "push_dotfiles: exits 1 when chezmoi is absent" {
@@ -142,8 +93,9 @@ mock_chezmoi_for_push() {
   _push_templates_no_changes() { echo "y" | push_dotfiles; }
   run _push_templates_no_changes
   assert_success
+  assert_output --partial "Template files (cannot be re-added)"
+  assert_output --partial "Template diffs are expected"
   assert_output --partial "All changed files are templates"
-  assert_output --partial "Edit the .tmpl source files"
   assert_output --partial "No changes to commit"
   refute_output --partial "chezmoi source updated"
   refute_output --partial "Committed"
@@ -180,6 +132,9 @@ mock_chezmoi_for_push() {
   _push_dotfiles_mixed() { echo "y" | push_dotfiles; }
   run _push_dotfiles_mixed
   assert_success
+  assert_output --partial "Changed files (will be re-added)"
+  assert_output --partial "Template files (cannot be re-added)"
+  assert_output --partial "Template diffs are expected"
   assert_output --partial "template files will be skipped"
   assert_output --partial ".claude/settings.json"
   assert_output --partial "chezmoi source updated"

@@ -192,6 +192,59 @@ git_commit_and_push() {
   ok "Pushed to remote"
 }
 
+# Classify chezmoi drift into template vs non-template files.
+# Sets global variables:
+#   TEMPLATE_FILES / TEMPLATE_COUNT
+#   NON_TEMPLATE_FILES / NON_TEMPLATE_COUNT
+# Returns 1 if chezmoi status reports no drift at all.
+classify_chezmoi_drift() {
+  local status_output
+  status_output=$(chezmoi status 2>/dev/null) || true
+  TEMPLATE_FILES=""
+  NON_TEMPLATE_FILES=""
+  TEMPLATE_COUNT=0
+  NON_TEMPLATE_COUNT=0
+
+  [[ -z "$status_output" ]] && return 1
+
+  local changed_files f src
+  changed_files=$(awk '{print $NF}' <<< "$status_output")
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    src=$(chezmoi source-path "$HOME/$f" 2>/dev/null) || src=""
+    if [[ "$src" == *.tmpl ]]; then
+      TEMPLATE_FILES+="$f"$'\n'
+      TEMPLATE_COUNT=$((TEMPLATE_COUNT + 1))
+    else
+      NON_TEMPLATE_FILES+="$f"$'\n'
+      NON_TEMPLATE_COUNT=$((NON_TEMPLATE_COUNT + 1))
+    fi
+  done <<< "$changed_files"
+}
+
+# Filter unified diff output to show only diffs for files in a given list.
+# $1 = full diff output (from chezmoi diff --reverse)
+# $2 = newline-separated list of target paths to include
+_show_diff_for_files() {
+  local full_diff="$1" file_list="$2"
+  local line current_chunk="" current_path="" show=false
+
+  while IFS= read -r line; do
+    if [[ "$line" == "diff --git "* ]]; then
+      [[ "$show" == true && -n "$current_chunk" ]] && printf '%s\n' "$current_chunk"
+      current_path="${line##* b/}"
+      current_chunk="$line"
+      show=false
+      while IFS= read -r f; do
+        [[ -n "$f" && "$current_path" == "$f" ]] && { show=true; break; }
+      done <<< "$file_list"
+    else
+      [[ -n "$current_chunk" ]] && current_chunk+=$'\n'"$line"
+    fi
+  done <<< "$full_diff"
+  [[ "$show" == true && -n "$current_chunk" ]] && printf '%s\n' "$current_chunk"
+}
+
 push_packages() {
   require brew
 
@@ -261,30 +314,26 @@ push_dotfiles() {
     return 0
   fi
 
-  echo
-  printf '%s\n' "$diff_output"
-  echo
-  # Detect template files — chezmoi re-add skips them.
-  # chezmoi status outputs "XY <path>" where XY is a two-char status code
-  # and <path> is relative to the target dir (home). $NF extracts the path.
-  local changed_files template_files non_template_count src
-  changed_files=$(chezmoi status | awk '{print $NF}')
-  template_files=""
-  non_template_count=0
-  while IFS= read -r f; do
-    [[ -z "$f" ]] && continue
-    src=$(chezmoi source-path "$HOME/$f" 2>/dev/null) || continue
-    if [[ "$src" == *.tmpl ]]; then
-      template_files+="  $f"$'\n'
-    else
-      non_template_count=$((non_template_count + 1))
-    fi
-  done <<< "$changed_files"
+  classify_chezmoi_drift || true
 
-  if [[ "$non_template_count" -eq 0 && -n "$template_files" ]]; then
+  if [[ "$NON_TEMPLATE_COUNT" -gt 0 ]]; then
+    echo
+    header "Changed files (will be re-added)"
+    _show_diff_for_files "$diff_output" "$NON_TEMPLATE_FILES"
+  fi
+
+  if [[ "$TEMPLATE_COUNT" -gt 0 ]]; then
+    echo
+    header "Template files (cannot be re-added)"
+    _show_diff_for_files "$diff_output" "$TEMPLATE_FILES"
+    info "Template diffs are expected — .tmpl source files contain template syntax"
+    info "Edit the .tmpl source files in $DOTFILES_DIR if actual changes are needed"
+  fi
+
+  echo
+
+  if [[ "$NON_TEMPLATE_COUNT" -eq 0 && "$TEMPLATE_COUNT" -gt 0 ]]; then
     warn "All changed files are templates — chezmoi re-add cannot update them"
-    info "Edit the .tmpl source files in $DOTFILES_DIR, then re-run to push"
-    # Offer to commit+push any manual edits already in the dotfiles repo.
     # git_commit_and_push handles the no-op case (nothing to commit).
     confirm_or_abort "Push pending changes in dotfiles repo?" \
       && git_commit_and_push "push dotfiles: update templates"
@@ -293,10 +342,9 @@ push_dotfiles() {
 
   confirm_or_abort "Re-add these files?" || return 0
 
-  if [[ -n "$template_files" ]]; then
+  if [[ "$TEMPLATE_COUNT" -gt 0 ]]; then
     warn "These template files will be skipped by re-add:"
-    printf '%s' "$template_files"
-    info "Update them manually in $DOTFILES_DIR if needed"
+    while IFS= read -r f; do [[ -n "$f" ]] && echo "  $f"; done <<< "$TEMPLATE_FILES"
   fi
 
   chezmoi re-add || die "chezmoi re-add failed"
@@ -423,12 +471,23 @@ cmd_status() {
   fi
   if have chezmoi; then
     ok "chezmoi installed"
-    local drift
-    drift=$(chezmoi status 2>/dev/null | grep -c '.' || true)
-    if [[ "$drift" -eq 0 ]]; then
-      ok "chezmoi: all managed files in sync"
+    if classify_chezmoi_drift; then
+      if [[ "$NON_TEMPLATE_COUNT" -gt 0 ]]; then
+        warn "chezmoi: ${NON_TEMPLATE_COUNT} file(s) out of sync — run 'push dotfiles' or 'install dotfiles'"
+        if [[ "$show_details" == true ]]; then
+          while IFS= read -r f; do [[ -n "$f" ]] && dim "  $f"; done <<< "$NON_TEMPLATE_FILES"
+        fi
+      else
+        ok "chezmoi: all managed files in sync"
+      fi
+      if [[ "$TEMPLATE_COUNT" -gt 0 ]]; then
+        info "chezmoi: ${TEMPLATE_COUNT} template file(s) differ (expected — edit .tmpl sources in $DOTFILES_DIR to update)"
+        if [[ "$show_details" == true ]]; then
+          while IFS= read -r f; do [[ -n "$f" ]] && dim "  $f"; done <<< "$TEMPLATE_FILES"
+        fi
+      fi
     else
-      warn "chezmoi: ${drift} file(s) out of sync — run 'push dotfiles' or 'install dotfiles'"
+      ok "chezmoi: all managed files in sync"
     fi
   else
     warn "chezmoi not installed"

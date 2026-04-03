@@ -118,26 +118,67 @@ mock_hostname() {
 
 @test "status: shows ok when chezmoi reports no drift" {
   mock_hostname "test-box"
-  mock_cmd chezmoi 0 ""
+  mock_chezmoi_for_status clean
   run cmd_status
   assert_success
   assert_output --partial "chezmoi installed"
   assert_output --partial "all managed files in sync"
+  refute_output --partial "template file(s) differ"
 }
 
-@test "status: warns when chezmoi reports drift" {
+@test "status: warns when chezmoi reports non-template drift" {
   mock_hostname "test-box"
-  {
-    printf '#!/usr/bin/env bash\n'
-    printf 'if [[ "$1" == "status" ]]; then\n'
-    printf '  printf "MM .gitconfig\\n M .claude\\n"\n'
-    printf '  exit 0\n'
-    printf 'fi\n'
-  } > "$MOCK_BIN/chezmoi"
-  chmod +x "$MOCK_BIN/chezmoi"
+  mock_chezmoi_for_status drift
   run cmd_status
   assert_success
   assert_output --partial "2 file(s) out of sync"
+  refute_output --partial "template file(s) differ"
+}
+
+@test "status: shows ok + template info when only templates differ" {
+  mock_hostname "test-box"
+  mock_chezmoi_for_status template-only
+  run cmd_status
+  assert_success
+  assert_output --partial "all managed files in sync"
+  assert_output --partial "1 template file(s) differ"
+  assert_output --partial "expected"
+  refute_output --partial "out of sync"
+}
+
+@test "status: shows warning + template info for mixed drift" {
+  mock_hostname "test-box"
+  mock_chezmoi_for_status mixed
+  run cmd_status
+  assert_success
+  assert_output --partial "1 file(s) out of sync"
+  assert_output --partial "1 template file(s) differ"
+}
+
+@test "status --details: lists drifted file names" {
+  mock_hostname "test-box"
+  mock_chezmoi_for_status drift
+  run cmd_status --details
+  assert_success
+  assert_output --partial ".bashrc"
+  assert_output --partial ".zshrc"
+}
+
+@test "status --details: lists template file names" {
+  mock_hostname "test-box"
+  mock_chezmoi_for_status template-only
+  run cmd_status --details
+  assert_success
+  assert_output --partial ".claude/settings.json"
+}
+
+@test "status: hides file names without --details" {
+  mock_hostname "test-box"
+  mock_chezmoi_for_status mixed
+  run cmd_status
+  assert_success
+  refute_output --partial ".bashrc"
+  refute_output --partial ".claude/settings.json"
 }
 
 # ── Brew bundle check ──────────────────────────────────────────────────────
