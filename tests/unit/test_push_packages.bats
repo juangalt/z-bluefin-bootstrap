@@ -11,8 +11,9 @@ setup() {
 
 # Helper: mock brew that captures calls and creates a Brewfile.
 # $1 = "same" to produce identical Brewfile, "different" to produce a changed one
+# $2 = autoremove --dry-run output (optional, empty = no orphans)
 mock_brew_for_dump() {
-  local mode="${1:-different}"
+  local mode="${1:-different}" autoremove_output="${2:-}"
   local source_brewfile="$DOTFILES_DIR/Brewfile"
   {
     printf '#!/usr/bin/env bash\n'
@@ -32,6 +33,9 @@ mock_brew_for_dump() {
     printf '        exit 0 ;;\n'
     printf '      *) exit 0 ;;\n'
     printf '    esac ;;\n'
+    printf '  autoremove)\n'
+    [[ -n "$autoremove_output" ]] && printf '    printf "%%s\\n" %q\n' "$autoremove_output"
+    printf '    exit 0 ;;\n'
     printf '  *) exit 0 ;;\n'
     printf 'esac\n'
   } > "$MOCK_BIN/brew"
@@ -102,4 +106,48 @@ mock_brew_for_dump() {
   run push_packages
   assert_failure
   assert_output --partial "brew bundle dump failed"
+}
+
+# ── Orphan cleanup ───────────────────────────────────────────────────────────
+
+@test "push_packages: removes orphans when user confirms" {
+  mkdir -p "$DOTFILES_DIR/.git"
+  printf 'brew "atuin"\nbrew "bat"\n' > "$DOTFILES_DIR/Brewfile"
+  local orphans
+  orphans="==> Would autoremove 2 unneeded formulae:
+libxau
+libxcb"
+  mock_brew_for_dump same "$orphans"
+  _push_confirm_orphans() { echo "y" | push_packages; }
+  run _push_confirm_orphans
+  assert_success
+  assert_output --partial "2 orphaned package(s) found"
+  assert_output --partial "libxau"
+  assert_output --partial "Orphaned packages removed"
+  assert_output --partial "Brewfile already in sync"
+}
+
+@test "push_packages: skips orphans when user declines" {
+  mkdir -p "$DOTFILES_DIR/.git"
+  printf 'brew "atuin"\nbrew "bat"\n' > "$DOTFILES_DIR/Brewfile"
+  local orphans
+  orphans="==> Would autoremove 1 unneeded formula:
+libxau"
+  mock_brew_for_dump same "$orphans"
+  _push_decline_orphans() { echo "n" | push_packages; }
+  run _push_decline_orphans
+  assert_success
+  assert_output --partial "1 orphaned package(s) found"
+  assert_output --partial "Aborted"
+  assert_output --partial "Brewfile already in sync"
+}
+
+@test "push_packages: skips orphan check when none found" {
+  mkdir -p "$DOTFILES_DIR/.git"
+  printf 'brew "atuin"\nbrew "bat"\n' > "$DOTFILES_DIR/Brewfile"
+  mock_brew_for_dump same
+  run push_packages
+  assert_success
+  refute_output --partial "orphaned"
+  assert_output --partial "Brewfile already in sync"
 }

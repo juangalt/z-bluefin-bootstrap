@@ -198,6 +198,24 @@ push_packages() {
   local brewfile="$DOTFILES_DIR/Brewfile"
   [[ -f "$brewfile" ]] || die "Brewfile not found at $brewfile — run 'install dotfiles' first"
 
+  # ── Remove orphaned dependencies ──
+  local autoremove_output orphan_lines orphan_count
+  autoremove_output=$(brew autoremove --dry-run 2>/dev/null) || true
+  if [[ -n "$autoremove_output" ]]; then
+    orphan_lines=$(printf '%s\n' "$autoremove_output" | grep -vE '^(==>|$)' || true)
+    orphan_count=$(printf '%s\n' "$orphan_lines" | grep -c . || true)
+    if [[ "$orphan_count" -gt 0 ]]; then
+      warn "${orphan_count} orphaned package(s) found"
+      printf '%s\n' "$orphan_lines" | while IFS= read -r pkg; do
+        dim "${pkg}"
+      done
+      if confirm_or_abort "Remove orphaned packages?"; then
+        brew autoremove || die "brew autoremove failed"
+        ok "Orphaned packages removed"
+      fi
+    fi
+  fi
+
   local tmpfile
   tmpfile=$(mktemp)
 
