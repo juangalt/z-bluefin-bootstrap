@@ -247,6 +247,8 @@ fortune"
   run cmd_status
   assert_success
   assert_output --partial "2 extra package(s) installed but not in Brewfile"
+  assert_output --partial "push packages"
+  assert_output --partial "brew autoremove"
   refute_output --partial "cowsay"
 }
 

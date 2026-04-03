@@ -459,7 +459,8 @@ cmd_status() {
       if [[ "$extras" -eq 0 ]]; then
         ok "Brewfile: no extra packages"
       else
-        warn "Brewfile: ${extras} extra package(s) installed but not in Brewfile — run 'push packages' to update"
+        warn "Brewfile: ${extras} extra package(s) installed but not in Brewfile"
+        info "  Run 'push packages' to add to Brewfile, or 'brew autoremove' to remove orphaned deps"
         if [[ "$show_details" == true ]]; then
           printf '%s\n' "$cleanup_output" | while IFS= read -r line; do
             if [[ "$line" =~ ^Would\  ]]; then
