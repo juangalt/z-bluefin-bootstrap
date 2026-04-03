@@ -133,14 +133,17 @@ mock_git_for_status() {
 
 # Write a brew mock for status checks (bundle check + bundle cleanup).
 # $1 = exit code for `brew bundle check` (0 = all installed, 1 = missing)
-# $2 = exit code for `brew bundle cleanup` (0 = no extras, 1 = extras found)
-# $3 = stdout for `brew bundle cleanup` when extras found (optional)
+# $2 = stdout for `brew bundle check` (optional)
+# $3 = exit code for `brew bundle cleanup` (0 = no extras, 1 = extras found)
+# $4 = stdout for `brew bundle cleanup` (optional)
 mock_brew_for_status() {
-  local check_rc="${1:-0}" cleanup_rc="${2:-0}" cleanup_output="${3:-}"
+  local check_rc="${1:-0}" check_output="${2:-}" cleanup_rc="${3:-0}" cleanup_output="${4:-}"
   {
     printf '#!/usr/bin/env bash\n'
     printf 'case "$2" in\n'
-    printf '  check) exit %s ;;\n' "$check_rc"
+    printf '  check)\n'
+    [[ -n "$check_output" ]] && printf '    printf "%%s\\n" %q\n' "$check_output"
+    printf '    exit %s ;;\n' "$check_rc"
     printf '  cleanup)\n'
     [[ -n "$cleanup_output" ]] && printf '    printf "%%s\\n" %q\n' "$cleanup_output"
     printf '    exit %s ;;\n' "$cleanup_rc"

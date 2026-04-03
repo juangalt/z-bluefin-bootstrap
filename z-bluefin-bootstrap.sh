@@ -19,6 +19,7 @@ ok()     { echo -e "  ${GREEN}✔${RESET}  $*"; }
 warn()   { echo -e "  ${YELLOW}⚠${RESET}  $*"; }
 err()    { echo -e "  ${RED}✘${RESET}  $*" >&2; }
 info()   { echo -e "  ${BLUE}ℹ${RESET}  $*"; }
+dim()    { echo -e "       ${DIM}$*${RESET}"; }
 header() { echo -e "\n${BOLD}$*${RESET}"; }
 die()    { err "$*"; exit 1; }
 
@@ -294,7 +295,7 @@ cmd_help() {
   echo -e "${BOLD}Usage:${RESET} z-bluefin-bootstrap.sh <command>"
   echo
   echo -e "${BOLD}Commands${RESET} ${DIM}(in typical setup order)${RESET}"
-  echo -e "  ${CYAN}status${RESET}                Show current state (SSH, dotfiles, chezmoi drift, brew)"
+  echo -e "  ${CYAN}status${RESET} [--details]     Show current state (SSH, dotfiles, chezmoi drift, brew)"
   echo -e "  ${CYAN}set-hostname${RESET} <name>   Set the system hostname via hostnamectl"
   echo -e "  ${CYAN}install github-key${RESET}    Save GitHub SSH key to ~/.ssh/github ${DIM}(requires Bitwarden)${RESET}"
   echo -e "  ${CYAN}install dotfiles${RESET}      Clone z-bluefin-dotfiles and apply config files with chezmoi"
@@ -331,11 +332,22 @@ cmd_help() {
   echo -e "  chezmoi diff"
   echo -e "  ${DIM}# List missing brew packages:${RESET}"
   echo -e "  brew bundle check --file=$DOTFILES_DIR/Brewfile --no-upgrade --verbose"
+  echo -e "  ${DIM}# Show individual package names in status:${RESET}"
+  echo -e "  ./z-bluefin-bootstrap.sh ${CYAN}status --details${RESET}"
   echo -e "  ${DIM}# Re-apply dotfiles without re-cloning:${RESET}"
   echo -e "  chezmoi apply"
 }
 
 cmd_status() {
+  local show_details=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --details) show_details=true ;;
+      *) die "Unknown option for status: $1" ;;
+    esac
+    shift
+  done
+
   header "System Status"
 
   # Hostname
@@ -424,16 +436,41 @@ cmd_status() {
   if have brew; then
     local brewfile="$DOTFILES_DIR/Brewfile"
     if [[ -f "$brewfile" ]]; then
-      local brew_output
-      if brew_output=$(brew bundle check --file="$brewfile" --no-upgrade --verbose 2>/dev/null); then
+      # ── Missing: in Brewfile but not installed ──
+      local brew_check_output
+      if brew_check_output=$(brew bundle check --file="$brewfile" --no-upgrade --verbose 2>/dev/null); then
         ok "Brewfile: all packages installed"
       else
         local missing
-        missing=$(printf '%s\n' "$brew_output" | grep -c '^→' || true)
+        missing=$(printf '%s\n' "$brew_check_output" | grep -c '^→' || true)
         warn "Brewfile: ${missing} package(s) missing — run 'install packages' to install"
+        if [[ "$show_details" == true ]]; then
+          printf '%s\n' "$brew_check_output" | grep '^→' | while IFS= read -r line; do
+            info "  ${line#→ }"
+          done
+        fi
       fi
-      if ! brew bundle cleanup --file="$brewfile" >/dev/null; then
-        warn "Brewfile: extra packages installed locally — run 'push packages' to update"
+
+      # ── Extras: installed but not in Brewfile ──
+      local cleanup_output
+      cleanup_output=$(brew bundle cleanup --file="$brewfile" 2>/dev/null) || true
+      local extras
+      extras=$(printf '%s\n' "$cleanup_output" | grep -cvE '^(Would |Run |$)' || true)
+      if [[ "$extras" -eq 0 ]]; then
+        ok "Brewfile: no extra packages"
+      else
+        warn "Brewfile: ${extras} extra package(s) installed but not in Brewfile — run 'push packages' to update"
+        if [[ "$show_details" == true ]]; then
+          printf '%s\n' "$cleanup_output" | while IFS= read -r line; do
+            if [[ "$line" =~ ^Would\  ]]; then
+              dim "${line}"
+            elif [[ "$line" =~ ^Run\  ]]; then
+              continue
+            elif [[ -n "$line" ]]; then
+              info "  ${line}"
+            fi
+          done
+        fi
       fi
     fi
   else

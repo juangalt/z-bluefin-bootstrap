@@ -142,7 +142,7 @@ mock_hostname() {
 
 # ── Brew bundle check ──────────────────────────────────────────────────────
 
-@test "status: shows ok when all brew packages installed" {
+@test "status: shows ok when all brew packages installed and no extras" {
   mock_hostname "test-box"
   mock_cmd brew 0
   mkdir -p "$DOTFILES_DIR"
@@ -150,23 +150,22 @@ mock_hostname() {
   run cmd_status
   assert_success
   assert_output --partial "Brewfile: all packages installed"
+  assert_output --partial "Brewfile: no extra packages"
 }
 
 @test "status: warns when brew packages are missing" {
   mock_hostname "test-box"
-  {
-    printf '#!/usr/bin/env bash\n'
-    printf 'printf "brew bundle can'"'"'t satisfy your Brewfile'"'"'s dependencies.\\n"\n'
-    printf 'printf "→ Formula ansible-lint needs to be installed.\\n"\n'
-    printf 'printf "→ Cask claude-code needs to be installed.\\n"\n'
-    printf 'exit 1\n'
-  } > "$MOCK_BIN/brew"
-  chmod +x "$MOCK_BIN/brew"
+  local check_out
+  check_out="brew bundle can't satisfy your Brewfile's dependencies.
+→ Formula ansible-lint needs to be installed.
+→ Cask claude-code needs to be installed."
+  mock_brew_for_status 1 "$check_out"
   mkdir -p "$DOTFILES_DIR"
   touch "$DOTFILES_DIR/Brewfile"
   run cmd_status
   assert_success
   assert_output --partial "2 package(s) missing"
+  refute_output --partial "ansible-lint"
 }
 
 @test "status: warns when brew is not installed" {
@@ -238,24 +237,83 @@ mock_hostname() {
 
 # ── Extra brew packages ──────────────────────────────────────────────────────
 
-@test "status: warns when extra brew packages are installed" {
+@test "status: warns when extra brew packages are installed with count" {
   mock_hostname "test-box"
-  mock_brew_for_status 0 1 "cowsay
+  mock_brew_for_status 0 "" 1 "Would uninstall formulae:
+cowsay
 fortune"
   mkdir -p "$DOTFILES_DIR"
   touch "$DOTFILES_DIR/Brewfile"
   run cmd_status
   assert_success
-  assert_output --partial "extra packages installed locally"
+  assert_output --partial "2 extra package(s) installed but not in Brewfile"
+  refute_output --partial "cowsay"
 }
 
-@test "status: no extra packages warning when none" {
+@test "status: shows no extra packages when cleanup is clean" {
   mock_hostname "test-box"
-  mock_brew_for_status 0 0
+  mock_brew_for_status 0 "" 0
   mkdir -p "$DOTFILES_DIR"
   touch "$DOTFILES_DIR/Brewfile"
   run cmd_status
   assert_success
-  refute_output --partial "extra packages"
+  assert_output --partial "Brewfile: no extra packages"
+}
+
+# ── --details flag ──────────────────────────────────────────────────────────
+
+@test "status --details: shows missing package names" {
+  mock_hostname "test-box"
+  local check_out
+  check_out="brew bundle can't satisfy your Brewfile's dependencies.
+→ Formula ansible-lint needs to be installed.
+→ Cask claude-code needs to be installed."
+  mock_brew_for_status 1 "$check_out"
+  mkdir -p "$DOTFILES_DIR"
+  touch "$DOTFILES_DIR/Brewfile"
+  run cmd_status --details
+  assert_success
+  assert_output --partial "2 package(s) missing"
+  assert_output --partial "ansible-lint"
+  assert_output --partial "claude-code"
+}
+
+@test "status --details: shows extra package names" {
+  mock_hostname "test-box"
+  mock_brew_for_status 0 "" 1 "Would uninstall formulae:
+cowsay
+fortune
+Would uninstall casks:
+vlc"
+  mkdir -p "$DOTFILES_DIR"
+  touch "$DOTFILES_DIR/Brewfile"
+  run cmd_status --details
+  assert_success
+  assert_output --partial "3 extra package(s)"
+  assert_output --partial "cowsay"
+  assert_output --partial "fortune"
+  assert_output --partial "vlc"
+}
+
+@test "status: hides package names without --details" {
+  mock_hostname "test-box"
+  local check_out
+  check_out="→ Formula ansible-lint needs to be installed."
+  mock_brew_for_status 1 "$check_out" 1 "Would uninstall formulae:
+cowsay"
+  mkdir -p "$DOTFILES_DIR"
+  touch "$DOTFILES_DIR/Brewfile"
+  run cmd_status
+  assert_success
+  assert_output --partial "1 package(s) missing"
+  assert_output --partial "1 extra package(s)"
+  refute_output --partial "ansible-lint"
+  refute_output --partial "cowsay"
+}
+
+@test "status: rejects unknown flag" {
+  run cmd_status --bogus
+  assert_failure
+  assert_output --partial "Unknown option for status: --bogus"
 }
 

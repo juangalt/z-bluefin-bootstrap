@@ -13,7 +13,7 @@ This repo is **public**. Never commit secrets, credentials, API keys, private ke
 The only executable is `z-bluefin-bootstrap.sh`. Commands:
 
 ```bash
-./z-bluefin-bootstrap.sh status                         # Check current state
+./z-bluefin-bootstrap.sh status [--details]              # Check current state (--details lists packages)
 ./z-bluefin-bootstrap.sh set-hostname my-laptop         # Set system hostname
 ./z-bluefin-bootstrap.sh install github-key             # Save GitHub SSH key
 ./z-bluefin-bootstrap.sh install dotfiles               # Clone z-bluefin-dotfiles + chezmoi apply
