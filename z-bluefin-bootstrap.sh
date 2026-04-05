@@ -194,13 +194,14 @@ git_commit_and_push() {
 
 # Classify chezmoi drift into template vs non-template files.
 # Sets global variables:
-#   TEMPLATE_FILES / TEMPLATE_COUNT
+#   TEMPLATE_FILES / TEMPLATE_COUNT / TEMPLATE_SOURCE_FILES
 #   NON_TEMPLATE_FILES / NON_TEMPLATE_COUNT
 # Returns 1 if chezmoi status reports no drift at all.
 classify_chezmoi_drift() {
   local status_output
   status_output=$(chezmoi status 2>/dev/null) || true
   TEMPLATE_FILES=""
+  TEMPLATE_SOURCE_FILES=""
   NON_TEMPLATE_FILES=""
   TEMPLATE_COUNT=0
   NON_TEMPLATE_COUNT=0
@@ -214,6 +215,7 @@ classify_chezmoi_drift() {
     src=$(chezmoi source-path "$HOME/$f" 2>/dev/null) || src=""
     if [[ "$src" == *.tmpl ]]; then
       TEMPLATE_FILES+="$f"$'\n'
+      TEMPLATE_SOURCE_FILES+="$src"$'\n'
       TEMPLATE_COUNT=$((TEMPLATE_COUNT + 1))
     else
       NON_TEMPLATE_FILES+="$f"$'\n'
@@ -324,33 +326,39 @@ push_dotfiles() {
 
   if [[ "$TEMPLATE_COUNT" -gt 0 ]]; then
     echo
-    header "Template files (cannot be re-added)"
+    header "Template files (may differ after re-add)"
     _show_diff_for_files "$diff_output" "$TEMPLATE_FILES"
     info "Template diffs are expected — .tmpl source files contain template syntax"
     info "Edit the .tmpl source files in $DOTFILES_DIR if actual changes are needed"
   fi
 
-  echo
-
   if [[ "$NON_TEMPLATE_COUNT" -eq 0 && "$TEMPLATE_COUNT" -gt 0 ]]; then
-    warn "All changed files are templates — chezmoi re-add cannot update them"
-    # git_commit_and_push handles the no-op case (nothing to commit).
-    confirm_or_abort "Push pending changes in dotfiles repo?" \
-      && git_commit_and_push "push dotfiles: update templates"
+    echo
+    info "Skipping re-add — template files require manual editing"
+    info "Edit these source files directly:"
+    while IFS= read -r src; do
+      [[ -n "$src" ]] || continue
+      dim "$src"
+    done <<< "$TEMPLATE_SOURCE_FILES"
     return 0
   fi
 
-  confirm_or_abort "Re-add these files?" || return 0
+  echo
 
-  if [[ "$TEMPLATE_COUNT" -gt 0 ]]; then
-    warn "These template files will be skipped by re-add:"
-    while IFS= read -r f; do [[ -n "$f" ]] && echo "  ~/$f"; done <<< "$TEMPLATE_FILES"
-  fi
+  confirm_or_abort "Re-add ${NON_TEMPLATE_COUNT} changed file(s)?" || return 0
 
   chezmoi re-add || die "chezmoi re-add failed"
   ok "chezmoi source updated"
 
   git_commit_and_push "push dotfiles: re-add managed files"
+
+  if [[ "$TEMPLATE_COUNT" -gt 0 ]]; then
+    info "Template files still need manual editing:"
+    while IFS= read -r src; do
+      [[ -n "$src" ]] || continue
+      dim "$src"
+    done <<< "$TEMPLATE_SOURCE_FILES"
+  fi
 }
 
 # ── Command functions ─────────────────────────────────────────────────────────

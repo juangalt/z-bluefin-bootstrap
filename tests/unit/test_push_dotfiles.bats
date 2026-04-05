@@ -86,43 +86,23 @@ setup() {
 
 # ── Template tests ────────────────────────────────────────────────────────────
 
-@test "push_dotfiles: template-only with no git changes reports nothing to commit" {
+@test "push_dotfiles: template-only shows guidance and skips re-add" {
   mock_chezmoi_for_push template-only
-  mock_git_for_push clean
   mkdir -p "$DOTFILES_DIR/.git"
-  _push_templates_no_changes() { echo "y" | push_dotfiles; }
-  run _push_templates_no_changes
+  run push_dotfiles
   assert_success
-  assert_output --partial "Template files (cannot be re-added)"
+  assert_output --partial "Template files (may differ after re-add)"
   assert_output --partial "Template diffs are expected"
-  assert_output --partial "All changed files are templates"
-  assert_output --partial "No changes to commit"
+  assert_output --partial "Skipping re-add"
+  assert_output --partial "Edit these source files directly"
+  assert_output --partial "settings.json.tmpl"
   refute_output --partial "chezmoi source updated"
-  refute_output --partial "Committed"
-}
-
-@test "push_dotfiles: template-only with git changes prompts and pushes" {
-  mock_chezmoi_for_push template-only
-  mock_git_for_push changes
-  mkdir -p "$DOTFILES_DIR/.git"
-  _push_templates_confirm() { echo "y" | push_dotfiles; }
-  run _push_templates_confirm
-  assert_success
-  assert_output --partial "All changed files are templates"
-  assert_output --partial "Committed"
-  assert_output --partial "Pushed to remote"
-}
-
-@test "push_dotfiles: template-only with git changes aborts on decline" {
-  mock_chezmoi_for_push template-only
-  mock_git_for_push changes
-  mkdir -p "$DOTFILES_DIR/.git"
-  _push_templates_decline() { echo "n" | push_dotfiles; }
-  run _push_templates_decline
-  assert_success
-  assert_output --partial "All changed files are templates"
-  assert_output --partial "Aborted"
-  refute_output --partial "Committed"
+  refute_output --partial "Re-add"
+  refute_output --partial "No changes to commit"
+  # chezmoi re-add should NOT have been called
+  if [[ -f "$BATS_TEST_TMPDIR/chezmoi.calls" ]]; then
+    ! grep -q "re-add" "$BATS_TEST_TMPDIR/chezmoi.calls"
+  fi
 }
 
 @test "push_dotfiles: warns about templates but re-adds non-template files" {
@@ -133,10 +113,10 @@ setup() {
   run _push_dotfiles_mixed
   assert_success
   assert_output --partial "Changed files (will be re-added)"
-  assert_output --partial "Template files (cannot be re-added)"
+  assert_output --partial "Template files (may differ after re-add)"
   assert_output --partial "Template diffs are expected"
-  assert_output --partial "template files will be skipped"
-  assert_output --partial ".claude/settings.json"
   assert_output --partial "chezmoi source updated"
   assert_output --partial "Committed"
+  assert_output --partial "still need manual editing"
+  assert_output --partial "settings.json.tmpl"
 }
