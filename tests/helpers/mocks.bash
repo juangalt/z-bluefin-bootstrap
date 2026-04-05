@@ -67,22 +67,18 @@ mock_jq_value() {
   chmod +x "$MOCK_BIN/jq"
 }
 
-# Write a jq mock that returns values in sequence based on call count.
-# Usage: mock_jq_sequence VALUE1 VALUE2 ...
-# The last value is used for all subsequent calls beyond the count.
-mock_jq_sequence() {
-  local i=0
+# Write a jq mock that dispatches on the filter expression (the argument after -r).
+# Each argument is a PATTERN=VALUE pair; PATTERN is glob-matched against the jq filter.
+# Usage: mock_jq_dispatch ".status=unlocked" ".sshKey.privateKey=KEY_CONTENT"
+mock_jq_dispatch() {
   {
     printf '#!/usr/bin/env bash\n'
-    printf 'COUNTER_FILE="%s/jq_counter"\n' "$BATS_TEST_TMPDIR"
-    printf 'n=0; [[ -f "$COUNTER_FILE" ]] && n=$(cat "$COUNTER_FILE")\n'
-    printf 'n=$((n+1)); printf "%%s" "$n" > "$COUNTER_FILE"\n'
-    printf 'case $n in\n'
-    for val in "$@"; do
-      i=$((i+1))
-      printf '  %d) printf "%%s\\n" %q ;;\n' "$i" "$val"
+    printf 'FILTER="${@: -1}"\n'
+    printf 'case "$FILTER" in\n'
+    for mapping in "$@"; do
+      printf '  *%s*) printf "%%s\\n" %q ;;\n' "${mapping%%=*}" "${mapping#*=}"
     done
-    printf '  *) printf "%%s\\n" %q ;;\n' "${!#}"
+    printf '  *) printf "jq mock: unmatched filter: %%s\\n" "$FILTER" >&2; exit 1 ;;\n'
     printf 'esac\n'
   } > "$MOCK_BIN/jq"
   chmod +x "$MOCK_BIN/jq"

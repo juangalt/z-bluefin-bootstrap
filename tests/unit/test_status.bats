@@ -28,8 +28,7 @@ mock_hostname() {
 @test "status: shows tailscale connected with hostname and account" {
   mock_hostname "test-box"
   mock_cmd tailscale 0 "{}"
-  # jq is called 3 times: BackendState, HostName, CurrentTailnet.Name
-  mock_jq_sequence "Running" "ts-node" "user@example.com"
+  mock_jq_dispatch ".BackendState=Running" ".Self.HostName=ts-node" ".CurrentTailnet.Name=user@example.com"
   run cmd_status
   assert_success
   assert_output --partial "Tailscale connected"
@@ -40,7 +39,7 @@ mock_hostname() {
 @test "status: warns when tailscale is running but not connected" {
   mock_hostname "test-box"
   mock_cmd tailscale 0 "{}"
-  mock_jq_sequence "NeedsLogin" "unknown" "unknown"
+  mock_jq_dispatch ".BackendState=NeedsLogin" ".Self.HostName=unknown" ".CurrentTailnet.Name=unknown"
   run cmd_status
   assert_success
   assert_output --partial "Tailscale running but not connected to a tailnet"

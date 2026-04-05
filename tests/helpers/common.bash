@@ -17,7 +17,7 @@ load_bootstrap_functions() {
 
 # Standard environment isolation — call at the top of every setup().
 isolate_environment() {
-  unset BW_SESSION SSH_AUTH_SOCK SSH_AGENT_PID
+  unset BW_SESSION SSH_AUTH_SOCK SSH_AGENT_PID BASH_ENV ENV
   export HOME="$BATS_TEST_TMPDIR/home"
   mkdir -p "$HOME"
 }

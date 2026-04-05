@@ -67,7 +67,7 @@ setup() {
 
 @test "install github-key: logs in and saves key" {
   mock_bw_status unauthenticated
-  mock_jq_sequence "unauthenticated" "-----BEGIN OPENSSH PRIVATE KEY-----"
+  mock_jq_dispatch ".status=unauthenticated" ".sshKey.privateKey=-----BEGIN OPENSSH PRIVATE KEY-----"
   run bash "$BOOTSTRAP" install github-key
   assert_success
   assert_output --partial "BW_SESSION exported"
@@ -81,7 +81,7 @@ setup() {
 
 @test "recovery-key: logs in and loads key into ssh-agent" {
   mock_bw_status unauthenticated
-  mock_jq_sequence "unauthenticated" "-----BEGIN OPENSSH PRIVATE KEY-----"
+  mock_jq_dispatch ".status=unauthenticated" ".sshKey.privateKey=-----BEGIN OPENSSH PRIVATE KEY-----"
   mock_cmd ssh-add 0
   mock_ssh_agent
   # run captures stdout (non-TTY), so auto-detect triggers eval mode;
@@ -95,7 +95,7 @@ setup() {
 
 @test "recovery-key: eval mode exports ssh-agent vars" {
   mock_bw_status unauthenticated
-  mock_jq_sequence "unauthenticated" "-----BEGIN OPENSSH PRIVATE KEY-----"
+  mock_jq_dispatch ".status=unauthenticated" ".sshKey.privateKey=-----BEGIN OPENSSH PRIVATE KEY-----"
   mock_cmd ssh-add 0
   mock_ssh_agent
   run bash -c "bash '$BOOTSTRAP' recovery-key 2>/dev/null"
@@ -106,7 +106,7 @@ setup() {
 
 @test "recovery-key: eval mode sends progress to stderr only" {
   mock_bw_status unauthenticated
-  mock_jq_sequence "unauthenticated" "-----BEGIN OPENSSH PRIVATE KEY-----"
+  mock_jq_dispatch ".status=unauthenticated" ".sshKey.privateKey=-----BEGIN OPENSSH PRIVATE KEY-----"
   mock_cmd ssh-add 0
   mock_ssh_agent
   run bash -c "bash '$BOOTSTRAP' recovery-key 2>/dev/null"
@@ -118,7 +118,7 @@ setup() {
 
 @test "install all: runs login + github-key + dotfiles + packages" {
   mock_bw_status unauthenticated
-  mock_jq_sequence "unauthenticated" "-----BEGIN OPENSSH PRIVATE KEY-----"
+  mock_jq_dispatch ".status=unauthenticated" ".sshKey.privateKey=-----BEGIN OPENSSH PRIVATE KEY-----"
   mock_cmd git 0
   mock_cmd chezmoi 0
   mock_cmd brew 0
