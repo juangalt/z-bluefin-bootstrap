@@ -282,7 +282,9 @@ mock_hostname() {
   mock_hostname "test-box"
   mock_brew_for_status 0 "" 1 "Would uninstall formulae:
 cowsay
-fortune"
+fortune
+==> This operation would free approximately 50MB of disk space.
+Run \`brew bundle cleanup --force\` to make these changes."
   mkdir -p "$DOTFILES_DIR"
   touch "$DOTFILES_DIR/Brewfile"
   run cmd_status
@@ -296,6 +298,19 @@ fortune"
 @test "status: shows no extra packages when cleanup is clean" {
   mock_hostname "test-box"
   mock_brew_for_status 0 "" 0
+  mkdir -p "$DOTFILES_DIR"
+  touch "$DOTFILES_DIR/Brewfile"
+  run cmd_status
+  assert_success
+  assert_output --partial "Brewfile: no extra packages"
+}
+
+@test "status: does not count ==> summary line as extra package" {
+  mock_hostname "test-box"
+  mock_brew_for_status 0 "" 1 "Would \`brew cleanup\`:
+Would remove: /some/cache (100MB)
+==> This operation would free approximately 100MB of disk space.
+Run \`brew bundle cleanup --force\` to make these changes."
   mkdir -p "$DOTFILES_DIR"
   touch "$DOTFILES_DIR/Brewfile"
   run cmd_status
@@ -327,7 +342,9 @@ fortune"
 cowsay
 fortune
 Would uninstall casks:
-vlc"
+vlc
+==> This operation would free approximately 100MB of disk space.
+Run \`brew bundle cleanup --force\` to make these changes."
   mkdir -p "$DOTFILES_DIR"
   touch "$DOTFILES_DIR/Brewfile"
   run cmd_status --details
@@ -336,6 +353,7 @@ vlc"
   assert_output --partial "cowsay"
   assert_output --partial "fortune"
   assert_output --partial "vlc"
+  refute_output --partial "==> This operation"
 }
 
 @test "status: hides package names without --details" {
@@ -343,7 +361,9 @@ vlc"
   local check_out
   check_out="→ Formula ansible-lint needs to be installed."
   mock_brew_for_status 1 "$check_out" 1 "Would uninstall formulae:
-cowsay"
+cowsay
+==> This operation would free approximately 10MB of disk space.
+Run \`brew bundle cleanup --force\` to make these changes."
   mkdir -p "$DOTFILES_DIR"
   touch "$DOTFILES_DIR/Brewfile"
   run cmd_status

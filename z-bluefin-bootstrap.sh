@@ -532,7 +532,7 @@ cmd_status() {
       local cleanup_output
       cleanup_output=$(brew bundle cleanup --file="$brewfile" 2>/dev/null) || true
       local extras
-      extras=$(printf '%s\n' "$cleanup_output" | grep -cvE '^(Would |Run |$)' || true)
+      extras=$(printf '%s\n' "$cleanup_output" | grep -cvE '^(Would |Run |==> |$)' || true)
       if [[ "$extras" -eq 0 ]]; then
         ok "Brewfile: no extra packages"
       else
@@ -542,7 +542,7 @@ cmd_status() {
           printf '%s\n' "$cleanup_output" | while IFS= read -r line; do
             if [[ "$line" =~ ^Would\  ]]; then
               dim "${line}"
-            elif [[ "$line" =~ ^Run\  ]]; then
+            elif [[ "$line" =~ ^(Run\ |==>\ ) ]]; then
               continue
             elif [[ -n "$line" ]]; then
               info "  ${line}"
