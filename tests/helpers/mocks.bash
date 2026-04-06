@@ -241,3 +241,25 @@ mock_ssh_agent() {
   } > "$MOCK_BIN/ssh-agent"
   chmod +x "$MOCK_BIN/ssh-agent"
 }
+
+# Write a dconf mock that dispatches `dconf read <path>` based on the key path.
+# Each positional argument is a /full/dconf/path=value pair.
+# Pass --capture as first arg to log calls to $BATS_TEST_TMPDIR/dconf.calls.
+# Usage: mock_dconf "/org/gnome/Ptyxis/interface-style='system'" ...
+#        mock_dconf --capture "/org/gnome/Ptyxis/foo=NEWVAL" ...
+mock_dconf() {
+  local capture=false
+  if [[ "${1:-}" == "--capture" ]]; then capture=true; shift; fi
+  {
+    printf '#!/usr/bin/env bash\n'
+    [[ "$capture" == true ]] && printf 'printf "%%s\\n" "$*" >> %q\n' "$BATS_TEST_TMPDIR/dconf.calls"
+    printf '[[ "$1" != "read" ]] && exit 0\n'
+    printf 'case "$2" in\n'
+    for mapping in "$@"; do
+      printf '  %q) printf "%%s\\n" %q ;;\n' "${mapping%%=*}" "${mapping#*=}"
+    done
+    printf '  *) ;;\n'
+    printf 'esac\n'
+  } > "$MOCK_BIN/dconf"
+  chmod +x "$MOCK_BIN/dconf"
+}

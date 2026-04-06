@@ -8,6 +8,7 @@ setup() {
   load '../helpers/mocks'
   isolate_environment
   setup_mock_bin
+  DOTFILES_DIR="$HOME/z-bluefin-dotfiles"
 }
 
 # ── help ─────────────────────────────────────────────────────────────────────
@@ -19,9 +20,11 @@ setup() {
   assert_output --partial "install github-key"
   assert_output --partial "install dotfiles"
   assert_output --partial "install packages"
+  assert_output --partial "install dconf"
   assert_output --partial "install all"
   assert_output --partial "push packages"
   assert_output --partial "push dotfiles"
+  assert_output --partial "push dconf"
   assert_output --partial "recovery-key"
 }
 
@@ -116,20 +119,22 @@ setup() {
 
 # ── install all ──────────────────────────────────────────────────────────────
 
-@test "install all: runs login + github-key + dotfiles + packages" {
+@test "install all: runs login + github-key + dotfiles + packages + dconf" {
   mock_bw_status unauthenticated
   mock_jq_dispatch ".status=unauthenticated" ".sshKey.privateKey=-----BEGIN OPENSSH PRIVATE KEY-----"
   mock_cmd git 0
   mock_cmd chezmoi 0
   mock_cmd brew 0
-  mkdir -p "$HOME/z-bluefin-dotfiles"
-  touch "$HOME/z-bluefin-dotfiles/Brewfile"
+  mock_cmd dconf 0
+  setup_gnome_ini_files
+  touch "$DOTFILES_DIR/Brewfile"
   run bash "$BOOTSTRAP" install all
   assert_success
   assert_output --partial "BW_SESSION exported"
   assert_output --partial "GitHub SSH key saved"
   assert_output --partial "Dotfiles applied"
   assert_output --partial "All packages installed"
+  assert_output --partial "GNOME Settings"
   assert_output --partial "Bootstrap complete."
   refute_output --partial "Git identity"
   refute_output --partial "Primary SSH key"
@@ -196,6 +201,30 @@ setup() {
   assert_success
   assert_output --partial "GitHub SSH key not found"
   assert_output --partial "All packages installed"
+}
+
+# ── install dconf ────────────────────────────────────────────────────────────
+
+@test "install dconf: loads settings when drift exists" {
+  mock_cmd git 0
+  mock_dconf --capture \
+    "/org/gnome/Ptyxis/foo=CHANGED" \
+    "/org/gnome/settings-daemon/plugins/media-keys/baz=three" \
+    "/org/gnome/shell/qux=four"
+  setup_gnome_ini_files
+  run bash "$BOOTSTRAP" install dconf
+  assert_success
+  assert_output --partial "ptyxis applied"
+  assert_output --partial "1 area(s) updated"
+}
+
+@test "install dconf: warns when github key missing" {
+  mock_cmd git 0
+  mock_cmd dconf 0
+  setup_gnome_ini_files
+  run bash "$BOOTSTRAP" install dconf
+  assert_success
+  assert_output --partial "GitHub SSH key not found"
 }
 
 # ── install dotfiles ─────────────────────────────────────────────────────────

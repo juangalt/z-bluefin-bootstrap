@@ -28,3 +28,12 @@ setup_mock_bin() {
   mkdir -p "$MOCK_BIN"
   export PATH="$MOCK_BIN:$PATH"
 }
+
+# Create gnome ini fixture files for dconf tests.
+setup_gnome_ini_files() {
+  local gnome_dir="$DOTFILES_DIR/gnome"
+  mkdir -p "$gnome_dir"
+  printf '[/]\nfoo=one\n' > "$gnome_dir/ptyxis.ini"
+  printf '[/]\nbaz=three\n' > "$gnome_dir/keybindings.ini"
+  printf '[/]\nqux=four\n' > "$gnome_dir/extensions.ini"
+}

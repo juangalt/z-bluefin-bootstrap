@@ -33,6 +33,15 @@ DOTFILES_REPO="git@github.com:juangalt/z-bluefin-dotfiles.git"
 DOTFILES_DIR="$HOME/z-bluefin-dotfiles"
 GITHUB_KEY_FILE="$HOME/.ssh/github"
 
+# dconf area-to-path mapping — update when adding a new gnome/*.ini file.
+# desktop.ini excluded: root path "/" cannot be round-tripped with dconf dump.
+declare -gA DCONF_MAP=(
+  [ptyxis]="/org/gnome/Ptyxis/"
+  [keybindings]="/org/gnome/settings-daemon/plugins/media-keys/"
+  [extensions]="/org/gnome/shell/"
+)
+mapfile -t DCONF_AREAS < <(printf '%s\n' "${!DCONF_MAP[@]}" | sort)
+
 # ── Domain functions ──────────────────────────────────────────────────────────
 
 require_bw_session() {
@@ -128,6 +137,7 @@ load_recovery_key() {
 }
 
 ensure_dotfiles_repo() {
+  [[ "${_DOTFILES_ENSURED:-}" == true ]] && return 0
   require git
   if [[ -d "$DOTFILES_DIR" ]]; then
     info "Dotfiles repo already cloned at $DOTFILES_DIR — pulling latest..."
@@ -138,6 +148,7 @@ ensure_dotfiles_repo() {
     git clone "$DOTFILES_REPO" "$DOTFILES_DIR" || die "git clone failed for $DOTFILES_REPO"
     ok "Dotfiles repo cloned to $DOTFILES_DIR"
   fi
+  _DOTFILES_ENSURED=true
 }
 
 clone_and_apply_dotfiles() {
@@ -166,6 +177,32 @@ install_packages() {
   brew bundle install --file="$brewfile" --no-upgrade \
     || die "brew bundle install failed"
   ok "All packages installed"
+}
+
+install_dconf() {
+  require dconf
+  ensure_dotfiles_repo
+
+  local gnome_dir="$DOTFILES_DIR/gnome"
+  [[ -d "$gnome_dir" ]] || die "GNOME settings dir not found at $gnome_dir"
+
+  classify_dconf_drift
+  if [[ "$DCONF_DRIFT_COUNT" -eq 0 ]]; then
+    ok "GNOME settings already in sync"
+    return 0
+  fi
+
+  local area dconf_path ini_file
+  while IFS= read -r area; do
+    [[ -n "$area" ]] || continue
+    dconf_path="${DCONF_MAP[$area]}"
+    ini_file="$gnome_dir/${area}.ini"
+    info "Loading ${area} settings (${dconf_path})..."
+    dconf load "$dconf_path" < "$ini_file" || die "dconf load failed for ${area}"
+    ok "${area} applied"
+  done <<< "$DCONF_DRIFTED_AREAS"
+
+  ok "GNOME settings applied (${DCONF_DRIFT_COUNT} area(s) updated)"
 }
 
 confirm_or_abort() {
@@ -222,6 +259,75 @@ classify_chezmoi_drift() {
       NON_TEMPLATE_COUNT=$((NON_TEMPLATE_COUNT + 1))
     fi
   done <<< "$status_output"
+}
+
+# Check whether a single dconf area has drifted from its saved .ini file.
+# Returns 0 if drift found, 1 if all keys match.
+_dconf_area_has_drift() {
+  ! diff -q "$2" <(_generate_updated_dconf_ini "$1" "$2") >/dev/null 2>&1
+}
+
+# Generate an updated .ini file by reading live dconf values for each tracked key.
+# Preserves the file's section structure and key set — only values change.
+# $1 = dconf base path, $2 = path to .ini file
+# Outputs updated content to stdout.
+_generate_updated_dconf_ini() {
+  local base_path="$1" ini_file="$2"
+  local section="" key val full_path live_val
+
+  while IFS= read -r line; do
+    if [[ "$line" =~ ^\[(.+)\]$ ]]; then
+      section="${BASH_REMATCH[1]}"
+      printf '%s\n' "$line"
+      continue
+    fi
+    if [[ -z "$line" || "$line" != *=* ]]; then
+      printf '%s\n' "$line"
+      continue
+    fi
+    key="${line%%=*}"
+    val="${line#*=}"
+
+    if [[ "$base_path" == "/" ]]; then
+      full_path="/${section}/${key}"
+    elif [[ "$section" == "/" ]]; then
+      full_path="${base_path}${key}"
+    else
+      full_path="${base_path}${section}/${key}"
+    fi
+
+    live_val=$(dconf read "$full_path" 2>/dev/null) || live_val=""
+    if [[ -n "$live_val" ]]; then
+      printf '%s=%s\n' "$key" "$live_val"
+    else
+      printf '%s\n' "$line"
+    fi
+  done < "$ini_file"
+}
+
+# Classify dconf drift across all tracked GNOME setting areas.
+# Sets global variables:
+#   DCONF_DRIFTED_AREAS / DCONF_DRIFT_COUNT / DCONF_TOTAL
+# Returns 1 if gnome/ dir is missing.
+classify_dconf_drift() {
+  DCONF_DRIFTED_AREAS=""
+  DCONF_DRIFT_COUNT=0
+  DCONF_TOTAL=0
+
+  local gnome_dir="$DOTFILES_DIR/gnome"
+  [[ -d "$gnome_dir" ]] || return 1
+
+  local area dconf_path ini_file
+  for area in "${DCONF_AREAS[@]}"; do
+    dconf_path="${DCONF_MAP[$area]}"
+    ini_file="$gnome_dir/${area}.ini"
+    [[ -f "$ini_file" ]] || continue
+    DCONF_TOTAL=$((DCONF_TOTAL + 1))
+    if _dconf_area_has_drift "$dconf_path" "$ini_file"; then
+      DCONF_DRIFTED_AREAS+="$area"$'\n'
+      DCONF_DRIFT_COUNT=$((DCONF_DRIFT_COUNT + 1))
+    fi
+  done
 }
 
 # Filter unified diff output to show only diffs for files in a given list.
@@ -361,6 +467,49 @@ push_dotfiles() {
   fi
 }
 
+push_dconf() {
+  require dconf
+
+  local gnome_dir="$DOTFILES_DIR/gnome"
+  [[ -d "$gnome_dir" ]] || die "GNOME settings dir not found at $gnome_dir — run 'install dotfiles' first"
+
+  classify_dconf_drift
+  if [[ "$DCONF_DRIFT_COUNT" -eq 0 ]]; then
+    ok "GNOME settings already in sync"
+    return 0
+  fi
+
+  # Generate updated content once per area (avoids double dconf read)
+  local area dconf_path ini_file
+  declare -A updated_content
+  while IFS= read -r area; do
+    [[ -n "$area" ]] || continue
+    dconf_path="${DCONF_MAP[$area]}"
+    ini_file="$gnome_dir/${area}.ini"
+    updated_content[$area]=$(_generate_updated_dconf_ini "$dconf_path" "$ini_file")
+  done <<< "$DCONF_DRIFTED_AREAS"
+
+  echo
+  while IFS= read -r area; do
+    [[ -n "$area" ]] || continue
+    ini_file="$gnome_dir/${area}.ini"
+    diff -u --label "gnome/${area}.ini (saved)" --label "gnome/${area}.ini (live)" \
+      "$ini_file" <(printf '%s\n' "${updated_content[$area]}") || true
+  done <<< "$DCONF_DRIFTED_AREAS"
+  echo
+
+  confirm_or_abort "Update ${DCONF_DRIFT_COUNT} dconf ini file(s)?" || return 0
+
+  while IFS= read -r area; do
+    [[ -n "$area" ]] || continue
+    ini_file="$gnome_dir/${area}.ini"
+    printf '%s\n' "${updated_content[$area]}" > "$ini_file"
+  done <<< "$DCONF_DRIFTED_AREAS"
+  ok "dconf ini files updated"
+
+  git_commit_and_push "push dconf: update gnome ini files"
+}
+
 # ── Command functions ─────────────────────────────────────────────────────────
 
 cmd_help() {
@@ -369,14 +518,16 @@ cmd_help() {
   echo -e "${BOLD}Usage:${RESET} z-bluefin-bootstrap.sh <command>"
   echo
   echo -e "${BOLD}Commands${RESET} ${DIM}(in typical setup order)${RESET}"
-  echo -e "  ${CYAN}status${RESET} [--details]     Show current state (SSH, dotfiles, chezmoi drift, brew)"
+  echo -e "  ${CYAN}status${RESET} [--details]     Show current state (SSH, dotfiles, chezmoi drift, dconf drift, brew)"
   echo -e "  ${CYAN}set-hostname${RESET} <name>   Set the system hostname via hostnamectl"
   echo -e "  ${CYAN}install github-key${RESET}    Save GitHub SSH key to ~/.ssh/github ${DIM}(requires Bitwarden)${RESET}"
   echo -e "  ${CYAN}install dotfiles${RESET}      Clone z-bluefin-dotfiles and apply config files with chezmoi"
   echo -e "  ${CYAN}install packages${RESET}      Install brew packages and flatpaks from Brewfile"
-  echo -e "  ${CYAN}install all${RESET}           Run github-key + dotfiles + packages in one shot ${DIM}(requires Bitwarden)${RESET}"
+  echo -e "  ${CYAN}install dconf${RESET}        Load saved GNOME dconf settings from ini files"
+  echo -e "  ${CYAN}install all${RESET}           Run github-key + dotfiles + packages + dconf in one shot ${DIM}(requires Bitwarden)${RESET}"
   echo -e "  ${CYAN}push packages${RESET}         Dump current brew/flatpak state to Brewfile and push"
   echo -e "  ${CYAN}push dotfiles${RESET}         Re-add local dotfile changes to chezmoi source and push"
+  echo -e "  ${CYAN}push dconf${RESET}            Dump live GNOME dconf settings to ini files and push"
   echo -e "  ${CYAN}recovery-key${RESET}          Load recovery SSH key into ssh-agent ${DIM}(needs eval, see below)${RESET}"
   echo -e "  ${CYAN}help${RESET}                  Show this help"
   echo
@@ -388,6 +539,7 @@ cmd_help() {
   echo -e "  ./z-bluefin-bootstrap.sh ${CYAN}install github-key${RESET}"
   echo -e "  ./z-bluefin-bootstrap.sh ${CYAN}install dotfiles${RESET}"
   echo -e "  ./z-bluefin-bootstrap.sh ${CYAN}install packages${RESET}"
+  echo -e "  ./z-bluefin-bootstrap.sh ${CYAN}install dconf${RESET}"
   echo
   echo -e "  ${DIM}# Or all at once:${RESET}"
   echo -e "  ./z-bluefin-bootstrap.sh ${CYAN}install all${RESET}"
@@ -395,6 +547,7 @@ cmd_help() {
   echo -e "  ${DIM}# Push local changes back to dotfiles repo:${RESET}"
   echo -e "  ./z-bluefin-bootstrap.sh ${CYAN}push dotfiles${RESET}"
   echo -e "  ./z-bluefin-bootstrap.sh ${CYAN}push packages${RESET}"
+  echo -e "  ./z-bluefin-bootstrap.sh ${CYAN}push dconf${RESET}"
   echo
   echo -e "  ${DIM}# Load recovery SSH key into agent:${RESET}"
   echo -e "  eval \"\$(./z-bluefin-bootstrap.sh ${CYAN}recovery-key${RESET})\""
@@ -500,6 +653,26 @@ cmd_status() {
   else
     warn "chezmoi not installed"
   fi
+  # dconf (GNOME settings)
+  if have dconf; then
+    if [[ -d "$DOTFILES_DIR/gnome" ]]; then
+      classify_dconf_drift
+      if [[ "$DCONF_DRIFT_COUNT" -gt 0 ]]; then
+        local drifted_list
+        drifted_list=$(printf '%s' "$DCONF_DRIFTED_AREAS" | tr '\n' ',' | sed 's/,$//' | sed 's/,/, /g')
+        warn "dconf: ${DCONF_DRIFT_COUNT} area(s) out of sync — ${drifted_list}"
+        if [[ "$show_details" == true ]]; then
+          while IFS= read -r area; do
+            [[ -n "$area" ]] && dim "  gnome/${area}.ini"
+          done <<< "$DCONF_DRIFTED_AREAS"
+        fi
+      else
+        ok "dconf: all ${DCONF_TOTAL} GNOME setting area(s) in sync"
+      fi
+    fi
+  else
+    info "dconf not installed (GNOME settings check skipped)"
+  fi
   if [[ -d "$DOTFILES_DIR/.git" ]]; then
     local uncommitted unpushed
     uncommitted=$(git -C "$DOTFILES_DIR" status --porcelain 2>/dev/null | grep -c '.' || true)
@@ -598,6 +771,12 @@ cmd_install_packages() {
   install_packages
 }
 
+cmd_install_dconf() {
+  warn_if_no_github_key
+  header "GNOME Settings"
+  install_dconf
+}
+
 cmd_install_all() {
   bw_login_or_unlock
   header "GitHub SSH Key"
@@ -606,6 +785,8 @@ cmd_install_all() {
   clone_and_apply_dotfiles
   header "Packages"
   install_packages
+  header "GNOME Settings"
+  install_dconf
   echo
   ok "Bootstrap complete."
 }
@@ -617,8 +798,9 @@ cmd_install() {
     github-key) cmd_install_github_key "$@" ;;
     dotfiles)   cmd_install_dotfiles "$@" ;;
     packages)   cmd_install_packages "$@" ;;
+    dconf)      cmd_install_dconf "$@" ;;
     all)        cmd_install_all "$@" ;;
-    *)          die "Usage: z-bluefin-bootstrap.sh install {github-key|dotfiles|packages|all}" ;;
+    *)          die "Usage: z-bluefin-bootstrap.sh install {github-key|dotfiles|packages|dconf|all}" ;;
   esac
 }
 
@@ -632,13 +814,19 @@ cmd_push_dotfiles() {
   push_dotfiles
 }
 
+cmd_push_dconf() {
+  header "Push GNOME Settings"
+  push_dconf
+}
+
 cmd_push() {
   local subcmd="${1:-}"
   shift || true
   case "$subcmd" in
     packages) cmd_push_packages "$@" ;;
     dotfiles) cmd_push_dotfiles "$@" ;;
-    *)        die "Usage: z-bluefin-bootstrap.sh push {packages|dotfiles}" ;;
+    dconf)    cmd_push_dconf "$@" ;;
+    *)        die "Usage: z-bluefin-bootstrap.sh push {packages|dotfiles|dconf}" ;;
   esac
 }
 

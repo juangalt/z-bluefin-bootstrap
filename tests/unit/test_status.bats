@@ -275,6 +275,92 @@ mock_hostname() {
   refute_output --partial "clean and up to date"
 }
 
+# ── dconf drift ──────────────────────────────────────────────────────────────
+
+@test "status: shows ok when all dconf areas are in sync" {
+  mock_hostname "test-box"
+  setup_gnome_ini_files
+  mock_dconf \
+    "/org/gnome/Ptyxis/foo=one" \
+    "/org/gnome/settings-daemon/plugins/media-keys/baz=three" \
+    "/org/gnome/shell/qux=four"
+  run cmd_status
+  assert_success
+  assert_output --partial "dconf: all 3 GNOME setting area(s) in sync"
+}
+
+@test "status: warns when some dconf areas have drifted" {
+  mock_hostname "test-box"
+  setup_gnome_ini_files
+  mock_dconf \
+    "/org/gnome/Ptyxis/foo=CHANGED" \
+    "/org/gnome/settings-daemon/plugins/media-keys/baz=three" \
+    "/org/gnome/shell/qux=four"
+  run cmd_status
+  assert_success
+  assert_output --partial "dconf: 1 area(s) out of sync"
+  assert_output --partial "ptyxis"
+}
+
+@test "status: warns when all dconf areas have drifted" {
+  mock_hostname "test-box"
+  setup_gnome_ini_files
+  mock_dconf \
+    "/org/gnome/Ptyxis/foo=CHANGED" \
+    "/org/gnome/settings-daemon/plugins/media-keys/baz=CHANGED" \
+    "/org/gnome/shell/qux=CHANGED"
+  run cmd_status
+  assert_success
+  assert_output --partial "dconf: 3 area(s) out of sync"
+}
+
+@test "status: shows info when dconf is not installed" {
+  mock_hostname "test-box"
+  # dconf not in MOCK_BIN — restrict PATH so real dconf is not found
+  local saved_path="$PATH"
+  export PATH="$MOCK_BIN"
+  run cmd_status
+  export PATH="$saved_path"
+  assert_success
+  assert_output --partial "dconf not installed"
+}
+
+@test "status: silently skips dconf when gnome dir is missing" {
+  mock_hostname "test-box"
+  mkdir -p "$DOTFILES_DIR"
+  mock_cmd dconf 0
+  run cmd_status
+  assert_success
+  refute_output --partial "dconf"
+}
+
+@test "status --details: lists drifted dconf area file names" {
+  mock_hostname "test-box"
+  setup_gnome_ini_files
+  mock_dconf \
+    "/org/gnome/Ptyxis/foo=CHANGED" \
+    "/org/gnome/settings-daemon/plugins/media-keys/baz=CHANGED" \
+    "/org/gnome/shell/qux=four"
+  run cmd_status --details
+  assert_success
+  assert_output --partial "gnome/ptyxis.ini"
+  assert_output --partial "gnome/keybindings.ini"
+  refute_output --partial "gnome/extensions.ini"
+}
+
+@test "status: hides dconf file names without --details" {
+  mock_hostname "test-box"
+  setup_gnome_ini_files
+  mock_dconf \
+    "/org/gnome/Ptyxis/foo=CHANGED" \
+    "/org/gnome/settings-daemon/plugins/media-keys/baz=three" \
+    "/org/gnome/shell/qux=four"
+  run cmd_status
+  assert_success
+  assert_output --partial "1 area(s) out of sync"
+  refute_output --partial "gnome/ptyxis.ini"
+}
+
 # ── Extra brew packages ──────────────────────────────────────────────────────
 
 @test "status: warns when extra brew packages are installed with count" {
