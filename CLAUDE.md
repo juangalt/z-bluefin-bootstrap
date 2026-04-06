@@ -13,13 +13,13 @@ This repo is **public**. Never commit secrets, credentials, API keys, private ke
 The only executable is `z-bluefin-bootstrap.sh`. Commands:
 
 ```bash
-./z-bluefin-bootstrap.sh status [--details]              # Check current state (--details lists packages & dconf areas)
+./z-bluefin-bootstrap.sh status                          # Check current state (dependencies, SSH, dotfiles, packages, dconf)
 ./z-bluefin-bootstrap.sh set-hostname my-laptop         # Set system hostname
 ./z-bluefin-bootstrap.sh install github-key             # Save GitHub SSH key
 ./z-bluefin-bootstrap.sh install dotfiles               # Clone z-bluefin-dotfiles + chezmoi apply
 ./z-bluefin-bootstrap.sh install packages               # Install brew packages + flatpaks from Brewfile
 ./z-bluefin-bootstrap.sh install dconf                  # Load saved GNOME dconf settings from ini files
-./z-bluefin-bootstrap.sh install all                    # Run github-key + dotfiles + packages + dconf in one shot
+./z-bluefin-bootstrap.sh install all                    # Run github-key + clone repo + packages + dotfiles + dconf
 ./z-bluefin-bootstrap.sh push packages                  # Dump current brew/flatpak state to Brewfile and push
 ./z-bluefin-bootstrap.sh push dotfiles                  # Re-add local dotfile changes to chezmoi source and push
 ./z-bluefin-bootstrap.sh push dconf                     # Dump live GNOME dconf settings to ini files and push

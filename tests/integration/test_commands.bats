@@ -119,7 +119,7 @@ setup() {
 
 # ── install all ──────────────────────────────────────────────────────────────
 
-@test "install all: runs login + github-key + dotfiles + packages + dconf" {
+@test "install all: runs login + github-key + repo clone + packages + dotfiles + dconf" {
   mock_bw_status unauthenticated
   mock_jq_dispatch ".status=unauthenticated" ".sshKey.privateKey=-----BEGIN OPENSSH PRIVATE KEY-----"
   mock_cmd git 0
@@ -132,8 +132,9 @@ setup() {
   assert_success
   assert_output --partial "BW_SESSION exported"
   assert_output --partial "GitHub SSH key saved"
-  assert_output --partial "Dotfiles applied"
+  assert_output --partial "Dotfiles Repository"
   assert_output --partial "All packages installed"
+  assert_output --partial "Dotfiles applied"
   assert_output --partial "GNOME Settings"
   assert_output --partial "Bootstrap complete."
   refute_output --partial "Git identity"

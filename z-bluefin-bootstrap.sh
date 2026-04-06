@@ -518,13 +518,13 @@ cmd_help() {
   echo -e "${BOLD}Usage:${RESET} z-bluefin-bootstrap.sh <command>"
   echo
   echo -e "${BOLD}Commands${RESET} ${DIM}(in typical setup order)${RESET}"
-  echo -e "  ${CYAN}status${RESET} [--details]     Show current state (SSH, dotfiles, chezmoi drift, dconf drift, brew)"
+  echo -e "  ${CYAN}status${RESET}                Show current state (SSH, dotfiles, chezmoi drift, dconf drift, brew)"
   echo -e "  ${CYAN}set-hostname${RESET} <name>   Set the system hostname via hostnamectl"
   echo -e "  ${CYAN}install github-key${RESET}    Save GitHub SSH key to ~/.ssh/github ${DIM}(requires Bitwarden)${RESET}"
   echo -e "  ${CYAN}install dotfiles${RESET}      Clone z-bluefin-dotfiles and apply config files with chezmoi"
   echo -e "  ${CYAN}install packages${RESET}      Install brew packages and flatpaks from Brewfile"
   echo -e "  ${CYAN}install dconf${RESET}        Load saved GNOME dconf settings from ini files"
-  echo -e "  ${CYAN}install all${RESET}           Run github-key + dotfiles + packages + dconf in one shot ${DIM}(requires Bitwarden)${RESET}"
+  echo -e "  ${CYAN}install all${RESET}           Run github-key + clone repo + packages + dotfiles + dconf ${DIM}(requires Bitwarden)${RESET}"
   echo -e "  ${CYAN}push packages${RESET}         Dump current brew/flatpak state to Brewfile and push"
   echo -e "  ${CYAN}push dotfiles${RESET}         Re-add local dotfile changes to chezmoi source and push"
   echo -e "  ${CYAN}push dconf${RESET}            Dump live GNOME dconf settings to ini files and push"
@@ -566,14 +566,44 @@ cmd_help() {
 }
 
 cmd_status() {
-  local show_details=false
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --details) show_details=true ;;
-      *) die "Unknown option for status: $1" ;;
-    esac
-    shift
+  [[ $# -eq 0 ]] || die "status takes no arguments (got: $1)"
+
+  header "Dependencies"
+
+  local -a missing_required=()
+  local -a required_tools=(brew git jq dconf ssh-agent ssh-add hostnamectl)
+  for tool in "${required_tools[@]}"; do
+    have "$tool" || missing_required+=("$tool")
   done
+
+  if [[ ${#missing_required[@]} -eq 0 ]]; then
+    local req_list; req_list=$(printf '%s, ' "${required_tools[@]}"); req_list=${req_list%, }
+    ok "All required tools available (${req_list})"
+  else
+    warn "${#missing_required[@]} required tool(s) missing"
+    for tool in "${missing_required[@]}"; do
+      dim "$tool"
+    done
+  fi
+
+  local -a auto_tools=(bw chezmoi)
+  local -a missing_auto=()
+  for tool in "${auto_tools[@]}"; do
+    have "$tool" || missing_auto+=("$tool")
+  done
+
+  if [[ ${#missing_auto[@]} -eq 0 ]]; then
+    local auto_list; auto_list=$(printf '%s, ' "${auto_tools[@]}"); auto_list=${auto_list%, }
+    ok "Optional tools available (${auto_list} — auto-installed via brew when needed)"
+  else
+    for tool in "${missing_auto[@]}"; do
+      if have brew; then
+        info "$tool not installed (will be auto-installed via brew when needed)"
+      else
+        warn "$tool not installed (requires brew, which is also missing)"
+      fi
+    done
+  fi
 
   header "System Status"
 
@@ -635,17 +665,13 @@ cmd_status() {
     if classify_chezmoi_drift; then
       if [[ "$NON_TEMPLATE_COUNT" -gt 0 ]]; then
         warn "chezmoi: ${NON_TEMPLATE_COUNT} file(s) out of sync — run 'push dotfiles' or 'install dotfiles'"
-        if [[ "$show_details" == true ]]; then
-          while IFS= read -r f; do [[ -n "$f" ]] && dim "  ~/$f"; done <<< "$NON_TEMPLATE_FILES"
-        fi
+        while IFS= read -r f; do [[ -n "$f" ]] && dim "  ~/$f"; done <<< "$NON_TEMPLATE_FILES"
       else
         ok "chezmoi: all managed files in sync"
       fi
       if [[ "$TEMPLATE_COUNT" -gt 0 ]]; then
         info "chezmoi: ${TEMPLATE_COUNT} template file(s) differ (expected — edit .tmpl sources in $DOTFILES_DIR to update)"
-        if [[ "$show_details" == true ]]; then
-          while IFS= read -r f; do [[ -n "$f" ]] && dim "  ~/$f"; done <<< "$TEMPLATE_FILES"
-        fi
+        while IFS= read -r f; do [[ -n "$f" ]] && dim "  ~/$f"; done <<< "$TEMPLATE_FILES"
       fi
     else
       ok "chezmoi: all managed files in sync"
@@ -661,11 +687,9 @@ cmd_status() {
         local drifted_list
         drifted_list=$(printf '%s' "$DCONF_DRIFTED_AREAS" | tr '\n' ',' | sed 's/,$//' | sed 's/,/, /g')
         warn "dconf: ${DCONF_DRIFT_COUNT} area(s) out of sync — ${drifted_list}"
-        if [[ "$show_details" == true ]]; then
-          while IFS= read -r area; do
-            [[ -n "$area" ]] && dim "  gnome/${area}.ini"
-          done <<< "$DCONF_DRIFTED_AREAS"
-        fi
+        while IFS= read -r area; do
+          [[ -n "$area" ]] && dim "  gnome/${area}.ini"
+        done <<< "$DCONF_DRIFTED_AREAS"
       else
         ok "dconf: all ${DCONF_TOTAL} GNOME setting area(s) in sync"
       fi
@@ -702,11 +726,9 @@ cmd_status() {
         local missing
         missing=$(printf '%s\n' "$brew_check_output" | grep -c '^→' || true)
         warn "Brewfile: ${missing} package(s) missing — run 'install packages' to install"
-        if [[ "$show_details" == true ]]; then
-          printf '%s\n' "$brew_check_output" | grep '^→' | while IFS= read -r line; do
-            info "  ${line#→ }"
-          done
-        fi
+        printf '%s\n' "$brew_check_output" | grep '^→' | while IFS= read -r line; do
+          info "  ${line#→ }"
+        done
       fi
 
       # ── Extras: installed but not in Brewfile ──
@@ -719,17 +741,15 @@ cmd_status() {
       else
         warn "Brewfile: ${extras} extra package(s) installed but not in Brewfile"
         info "  Run 'push packages' to add to Brewfile, or 'brew autoremove' to remove orphaned deps"
-        if [[ "$show_details" == true ]]; then
-          printf '%s\n' "$cleanup_output" | while IFS= read -r line; do
-            if [[ "$line" =~ ^Would\  ]]; then
-              dim "${line}"
-            elif [[ "$line" =~ ^(Run\ |==>\ ) ]]; then
-              continue
-            elif [[ -n "$line" ]]; then
-              info "  ${line}"
-            fi
-          done
-        fi
+        printf '%s\n' "$cleanup_output" | while IFS= read -r line; do
+          if [[ "$line" =~ ^Would\  ]]; then
+            dim "${line}"
+          elif [[ "$line" =~ ^(Run\ |==>\ ) ]]; then
+            continue
+          elif [[ -n "$line" ]]; then
+            info "  ${line}"
+          fi
+        done
       fi
     fi
   else
@@ -778,13 +798,21 @@ cmd_install_dconf() {
 }
 
 cmd_install_all() {
+  # Order matters:
+  #   1. github-key  — SSH key needed for git clone over SSH
+  #   2. clone repo  — Brewfile and gnome/*.ini live here
+  #   3. packages    — installed before chezmoi so templates can reference them
+  #   4. dotfiles    — chezmoi apply, with packages already available
+  #   5. dconf       — GNOME settings, may depend on packages (e.g. extensions)
   bw_login_or_unlock
   header "GitHub SSH Key"
   save_github_key
-  header "Dotfiles"
-  clone_and_apply_dotfiles
+  header "Dotfiles Repository"
+  ensure_dotfiles_repo
   header "Packages"
   install_packages
+  header "Dotfiles"
+  clone_and_apply_dotfiles
   header "GNOME Settings"
   install_dconf
   echo

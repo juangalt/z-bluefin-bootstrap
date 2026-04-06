@@ -28,13 +28,13 @@ eval "$(./z-bluefin-bootstrap.sh recovery-key)"
 
 | Command | Description |
 |---|---|
-| `status [--details]` | Show current state (SSH, dotfiles, chezmoi drift, dconf drift, brew) |
+| `status` | Show current state (dependencies, SSH, dotfiles, chezmoi drift, dconf drift, brew) |
 | `set-hostname <name>` | Set the system hostname via hostnamectl |
 | `install github-key` | Save GitHub SSH key to `~/.ssh/github` (requires Bitwarden) |
 | `install dotfiles` | Clone z-bluefin-dotfiles and apply config files with chezmoi |
 | `install packages` | Install brew packages and flatpaks from Brewfile |
 | `install dconf` | Load saved GNOME dconf settings from ini files |
-| `install all` | Run github-key + dotfiles + packages + dconf in one shot (requires Bitwarden) |
+| `install all` | Run github-key + clone repo + packages + dotfiles + dconf (requires Bitwarden) |
 | `push dotfiles` | Re-add local dotfile changes to chezmoi source and push |
 | `push packages` | Dump current brew/flatpak state to Brewfile and push |
 | `push dconf` | Dump live GNOME dconf settings to ini files and push |
@@ -71,7 +71,7 @@ Ptyxis terminal, keyboard shortcuts, and extension configs saved as `gnome/*.ini
 
 ### The `status` command
 
-`status` checks all three systems in one pass and reports what's out of sync. Use `--details` to see specific file names, package names, or dconf areas.
+`status` checks all three systems in one pass and reports what's out of sync, including specific file names, package names, and dconf areas.
 
 ## Requirements
 

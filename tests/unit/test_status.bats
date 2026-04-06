@@ -14,6 +14,64 @@ mock_hostname() {
   mock_cmd hostname 0 "$1"
 }
 
+# ── Dependencies ────────────────────────────────────────────────────────────
+
+@test "status: shows all required tools available when all present" {
+  mock_hostname "test-box"
+  # Mock all required tools so they are on PATH
+  for tool in brew git jq dconf ssh-agent ssh-add hostnamectl bw chezmoi; do
+    mock_cmd "$tool" 0
+  done
+  run cmd_status
+  assert_success
+  assert_output --partial "All required tools available"
+  assert_output --partial "Optional tools available"
+}
+
+@test "status: warns when required tools are missing" {
+  mock_hostname "test-box"
+  # Only mock hostname — all other tools absent
+  local saved_path="$PATH"
+  export PATH="$MOCK_BIN"
+  run cmd_status
+  export PATH="$saved_path"
+  assert_success
+  assert_output --partial "required tool(s) missing"
+  assert_output --partial "brew"
+}
+
+@test "status: shows auto-installable info when missing but brew available" {
+  mock_hostname "test-box"
+  # Mock all required tools but not bw/chezmoi
+  for tool in brew git jq dconf ssh-agent ssh-add hostnamectl; do
+    mock_cmd "$tool" 0
+  done
+  run cmd_status
+  assert_success
+  assert_output --partial "All required tools available"
+  assert_output --partial "auto-installed via brew"
+}
+
+@test "status: warns about auto tools when brew also missing" {
+  mock_hostname "test-box"
+  local saved_path="$PATH"
+  export PATH="$MOCK_BIN"
+  run cmd_status
+  export PATH="$saved_path"
+  assert_success
+  assert_output --partial "requires brew, which is also missing"
+}
+
+@test "status: shows optional tools available when all present" {
+  mock_hostname "test-box"
+  for tool in brew git jq dconf ssh-agent ssh-add hostnamectl bw chezmoi; do
+    mock_cmd "$tool" 0
+  done
+  run cmd_status
+  assert_success
+  assert_output --partial "Optional tools available (bw, chezmoi"
+}
+
 # ── Hostname ────────────────────────────────────────────────────────────────
 
 @test "status: shows hostname" {
@@ -131,6 +189,8 @@ mock_hostname() {
   run cmd_status
   assert_success
   assert_output --partial "2 file(s) out of sync"
+  assert_output --partial ".bashrc"
+  assert_output --partial ".zshrc"
   refute_output --partial "template file(s) differ"
 }
 
@@ -142,6 +202,7 @@ mock_hostname() {
   assert_output --partial "all managed files in sync"
   assert_output --partial "1 template file(s) differ"
   assert_output --partial "expected"
+  assert_output --partial ".claude/settings.json"
   refute_output --partial "out of sync"
 }
 
@@ -151,33 +212,9 @@ mock_hostname() {
   run cmd_status
   assert_success
   assert_output --partial "1 file(s) out of sync"
-  assert_output --partial "1 template file(s) differ"
-}
-
-@test "status --details: lists drifted file names" {
-  mock_hostname "test-box"
-  mock_chezmoi_for_status drift
-  run cmd_status --details
-  assert_success
   assert_output --partial ".bashrc"
-  assert_output --partial ".zshrc"
-}
-
-@test "status --details: lists template file names" {
-  mock_hostname "test-box"
-  mock_chezmoi_for_status template-only
-  run cmd_status --details
-  assert_success
+  assert_output --partial "1 template file(s) differ"
   assert_output --partial ".claude/settings.json"
-}
-
-@test "status: hides file names without --details" {
-  mock_hostname "test-box"
-  mock_chezmoi_for_status mixed
-  run cmd_status
-  assert_success
-  refute_output --partial ".bashrc"
-  refute_output --partial ".claude/settings.json"
 }
 
 # ── Brew bundle check ──────────────────────────────────────────────────────
@@ -205,7 +242,8 @@ mock_hostname() {
   run cmd_status
   assert_success
   assert_output --partial "2 package(s) missing"
-  refute_output --partial "ansible-lint"
+  assert_output --partial "ansible-lint"
+  assert_output --partial "claude-code"
 }
 
 @test "status: warns when brew is not installed" {
@@ -300,6 +338,7 @@ mock_hostname() {
   assert_success
   assert_output --partial "dconf: 1 area(s) out of sync"
   assert_output --partial "ptyxis"
+  assert_output --partial "gnome/ptyxis.ini"
 }
 
 @test "status: warns when all dconf areas have drifted" {
@@ -325,40 +364,13 @@ mock_hostname() {
   assert_output --partial "dconf not installed"
 }
 
-@test "status: silently skips dconf when gnome dir is missing" {
+@test "status: silently skips dconf drift check when gnome dir is missing" {
   mock_hostname "test-box"
   mkdir -p "$DOTFILES_DIR"
   mock_cmd dconf 0
   run cmd_status
   assert_success
-  refute_output --partial "dconf"
-}
-
-@test "status --details: lists drifted dconf area file names" {
-  mock_hostname "test-box"
-  setup_gnome_ini_files
-  mock_dconf \
-    "/org/gnome/Ptyxis/foo=CHANGED" \
-    "/org/gnome/settings-daemon/plugins/media-keys/baz=CHANGED" \
-    "/org/gnome/shell/qux=four"
-  run cmd_status --details
-  assert_success
-  assert_output --partial "gnome/ptyxis.ini"
-  assert_output --partial "gnome/keybindings.ini"
-  refute_output --partial "gnome/extensions.ini"
-}
-
-@test "status: hides dconf file names without --details" {
-  mock_hostname "test-box"
-  setup_gnome_ini_files
-  mock_dconf \
-    "/org/gnome/Ptyxis/foo=CHANGED" \
-    "/org/gnome/settings-daemon/plugins/media-keys/baz=three" \
-    "/org/gnome/shell/qux=four"
-  run cmd_status
-  assert_success
-  assert_output --partial "1 area(s) out of sync"
-  refute_output --partial "gnome/ptyxis.ini"
+  refute_output --partial "dconf:"
 }
 
 # ── Extra brew packages ──────────────────────────────────────────────────────
@@ -377,7 +389,8 @@ Run \`brew bundle cleanup --force\` to make these changes."
   assert_output --partial "2 extra package(s) installed but not in Brewfile"
   assert_output --partial "push packages"
   assert_output --partial "brew autoremove"
-  refute_output --partial "cowsay"
+  assert_output --partial "cowsay"
+  assert_output --partial "fortune"
 }
 
 @test "status: shows no extra packages when cleanup is clean" {
@@ -403,65 +416,11 @@ Run \`brew bundle cleanup --force\` to make these changes."
   assert_output --partial "Brewfile: no extra packages"
 }
 
-# ── --details flag ──────────────────────────────────────────────────────────
+# ── Unknown arguments ──────────────────────────────────────────────────────
 
-@test "status --details: shows missing package names" {
-  mock_hostname "test-box"
-  local check_out
-  check_out="brew bundle can't satisfy your Brewfile's dependencies.
-→ Formula ansible-lint needs to be installed.
-→ Cask claude-code needs to be installed."
-  mock_brew_for_status 1 "$check_out"
-  mkdir -p "$DOTFILES_DIR"
-  touch "$DOTFILES_DIR/Brewfile"
-  run cmd_status --details
-  assert_success
-  assert_output --partial "2 package(s) missing"
-  assert_output --partial "ansible-lint"
-  assert_output --partial "claude-code"
-}
-
-@test "status --details: shows extra package names" {
-  mock_hostname "test-box"
-  mock_brew_for_status 0 "" 1 "Would uninstall formulae:
-cowsay
-fortune
-Would uninstall casks:
-vlc
-==> This operation would free approximately 100MB of disk space.
-Run \`brew bundle cleanup --force\` to make these changes."
-  mkdir -p "$DOTFILES_DIR"
-  touch "$DOTFILES_DIR/Brewfile"
-  run cmd_status --details
-  assert_success
-  assert_output --partial "3 extra package(s)"
-  assert_output --partial "cowsay"
-  assert_output --partial "fortune"
-  assert_output --partial "vlc"
-  refute_output --partial "==> This operation"
-}
-
-@test "status: hides package names without --details" {
-  mock_hostname "test-box"
-  local check_out
-  check_out="→ Formula ansible-lint needs to be installed."
-  mock_brew_for_status 1 "$check_out" 1 "Would uninstall formulae:
-cowsay
-==> This operation would free approximately 10MB of disk space.
-Run \`brew bundle cleanup --force\` to make these changes."
-  mkdir -p "$DOTFILES_DIR"
-  touch "$DOTFILES_DIR/Brewfile"
-  run cmd_status
-  assert_success
-  assert_output --partial "1 package(s) missing"
-  assert_output --partial "1 extra package(s)"
-  refute_output --partial "ansible-lint"
-  refute_output --partial "cowsay"
-}
-
-@test "status: rejects unknown flag" {
+@test "status: rejects unknown arguments" {
   run cmd_status --bogus
   assert_failure
-  assert_output --partial "Unknown option for status: --bogus"
+  assert_output --partial "status takes no arguments"
 }
 
