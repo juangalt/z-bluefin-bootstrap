@@ -559,14 +559,16 @@ cmd_help() {
   echo -e "  chezmoi diff"
   echo -e "  ${DIM}# List missing brew packages:${RESET}"
   echo -e "  brew bundle check --file=$DOTFILES_DIR/Brewfile --no-upgrade --verbose"
-  echo -e "  ${DIM}# Show individual package names in status:${RESET}"
-  echo -e "  ./z-bluefin-bootstrap.sh ${CYAN}status --details${RESET}"
   echo -e "  ${DIM}# Re-apply dotfiles without re-cloning:${RESET}"
   echo -e "  chezmoi apply"
 }
 
 cmd_status() {
   [[ $# -eq 0 ]] || die "status takes no arguments (got: $1)"
+
+  local _status_warns=0
+  _swarn() { (( ++_status_warns )); warn "$@"; }
+  trap 'unset -f _swarn' RETURN
 
   header "Dependencies"
 
@@ -576,39 +578,39 @@ cmd_status() {
     have "$tool" || missing_required+=("$tool")
   done
 
-  if [[ ${#missing_required[@]} -eq 0 ]]; then
-    local req_list; req_list=$(printf '%s, ' "${required_tools[@]}"); req_list=${req_list%, }
-    ok "All required tools available (${req_list})"
-  else
-    warn "${#missing_required[@]} required tool(s) missing"
-    for tool in "${missing_required[@]}"; do
-      dim "$tool"
-    done
-  fi
-
   local -a auto_tools=(bw chezmoi)
   local -a missing_auto=()
   for tool in "${auto_tools[@]}"; do
     have "$tool" || missing_auto+=("$tool")
   done
 
-  if [[ ${#missing_auto[@]} -eq 0 ]]; then
-    local auto_list; auto_list=$(printf '%s, ' "${auto_tools[@]}"); auto_list=${auto_list%, }
-    ok "Optional tools available (${auto_list} — auto-installed via brew when needed)"
+  if [[ ${#missing_required[@]} -eq 0 && ${#missing_auto[@]} -eq 0 ]]; then
+    ok "All tools available"
   else
-    for tool in "${missing_auto[@]}"; do
-      if have brew; then
-        info "$tool not installed (will be auto-installed via brew when needed)"
-      else
-        warn "$tool not installed (requires brew, which is also missing)"
-      fi
-    done
+    if [[ ${#missing_required[@]} -eq 0 ]]; then
+      local req_list; req_list=$(printf '%s, ' "${required_tools[@]}"); req_list=${req_list%, }
+      ok "All required tools available (${req_list})"
+    else
+      _swarn "${#missing_required[@]} required tool(s) missing"
+      for tool in "${missing_required[@]}"; do
+        dim "$tool"
+      done
+    fi
+    if [[ ${#missing_auto[@]} -eq 0 ]]; then
+      local auto_list; auto_list=$(printf '%s, ' "${auto_tools[@]}"); auto_list=${auto_list%, }
+      ok "Optional tools available (${auto_list} — auto-installed via brew when needed)"
+    else
+      for tool in "${missing_auto[@]}"; do
+        if have brew; then
+          info "$tool not installed (will be auto-installed via brew when needed)"
+        else
+          _swarn "$tool not installed (requires brew, which is also missing)"
+        fi
+      done
+    fi
   fi
 
-  header "System Status"
-
-  # Hostname
-  info "Hostname: $(hostname 2>/dev/null || echo 'unknown')"
+  header "System ($(hostname 2>/dev/null || echo 'unknown'))"
 
   # Tailscale
   if have tailscale; then
@@ -621,13 +623,13 @@ cmd_status() {
       if [[ "$ts_state" == "Running" ]]; then
         ok "Tailscale connected — hostname: ${ts_host}, account: ${ts_tailnet}"
       else
-        warn "Tailscale running but not connected to a tailnet"
+        _swarn "Tailscale running but not connected to a tailnet"
       fi
     else
-      warn "Tailscale installed but not running"
+      _swarn "Tailscale installed but not running — run 'sudo systemctl start tailscaled'"
     fi
   else
-    warn "Tailscale not installed"
+    _swarn "Tailscale not installed"
   fi
 
   header "SSH"
@@ -639,17 +641,17 @@ cmd_status() {
     if [[ "$perms" == "600" ]]; then
       ok "GitHub SSH key installed (~/.ssh/github, mode 600)"
     else
-      warn "GitHub SSH key exists but permissions are ${perms} (expected 600)"
+      _swarn "GitHub SSH key exists but permissions are ${perms} (expected 600) — run 'chmod 600 ~/.ssh/github'"
     fi
   else
-    warn "GitHub SSH key not installed"
+    _swarn "GitHub SSH key not installed — run 'install github-key'"
   fi
 
   # SSH config
   if grep -q "Host github.com" "$HOME/.ssh/config" 2>/dev/null; then
     ok "SSH config has github.com entry"
   else
-    warn "No github.com entry in ~/.ssh/config"
+    _swarn "No github.com entry in ~/.ssh/config — run 'install github-key'"
   fi
 
   header "Dotfiles"
@@ -658,13 +660,12 @@ cmd_status() {
   if [[ -d "$DOTFILES_DIR" ]]; then
     ok "Dotfiles repo present ($DOTFILES_DIR)"
   else
-    warn "Dotfiles repo not cloned"
+    _swarn "Dotfiles repo not cloned — run 'install dotfiles'"
   fi
   if have chezmoi; then
-    ok "chezmoi installed"
     if classify_chezmoi_drift; then
       if [[ "$NON_TEMPLATE_COUNT" -gt 0 ]]; then
-        warn "chezmoi: ${NON_TEMPLATE_COUNT} file(s) out of sync — run 'push dotfiles' or 'install dotfiles'"
+        _swarn "chezmoi: ${NON_TEMPLATE_COUNT} file(s) out of sync — run 'push dotfiles' or 'install dotfiles'"
         while IFS= read -r f; do [[ -n "$f" ]] && dim "  ~/$f"; done <<< "$NON_TEMPLATE_FILES"
       else
         ok "chezmoi: all managed files in sync"
@@ -676,40 +677,42 @@ cmd_status() {
     else
       ok "chezmoi: all managed files in sync"
     fi
-  else
-    warn "chezmoi not installed"
-  fi
-  # dconf (GNOME settings)
-  if have dconf; then
-    if [[ -d "$DOTFILES_DIR/gnome" ]]; then
-      classify_dconf_drift
-      if [[ "$DCONF_DRIFT_COUNT" -gt 0 ]]; then
-        local drifted_list
-        drifted_list=$(printf '%s' "$DCONF_DRIFTED_AREAS" | tr '\n' ',' | sed 's/,$//' | sed 's/,/, /g')
-        warn "dconf: ${DCONF_DRIFT_COUNT} area(s) out of sync — ${drifted_list}"
-        while IFS= read -r area; do
-          [[ -n "$area" ]] && dim "  gnome/${area}.ini"
-        done <<< "$DCONF_DRIFTED_AREAS"
-      else
-        ok "dconf: all ${DCONF_TOTAL} GNOME setting area(s) in sync"
-      fi
-    fi
-  else
-    info "dconf not installed (GNOME settings check skipped)"
   fi
   if [[ -d "$DOTFILES_DIR/.git" ]]; then
     local uncommitted unpushed
     uncommitted=$(git -C "$DOTFILES_DIR" status --porcelain 2>/dev/null | grep -c '.' || true)
     unpushed=$(git -C "$DOTFILES_DIR" log --oneline '@{upstream}..HEAD' 2>/dev/null | grep -c '.' || true)
     if [[ "$uncommitted" -gt 0 ]]; then
-      warn "dotfiles repo: ${uncommitted} uncommitted change(s)"
+      _swarn "dotfiles repo: ${uncommitted} uncommitted change(s) — commit or stash in $DOTFILES_DIR"
     fi
     if [[ "$unpushed" -gt 0 ]]; then
-      warn "dotfiles repo: ${unpushed} unpushed commit(s)"
+      _swarn "dotfiles repo: ${unpushed} unpushed commit(s) — push from $DOTFILES_DIR"
     fi
     if [[ "$uncommitted" -eq 0 && "$unpushed" -eq 0 ]]; then
       ok "dotfiles repo: clean and up to date with remote"
     fi
+  fi
+
+  header "GNOME Settings"
+
+  if have dconf; then
+    if [[ -d "$DOTFILES_DIR/gnome" ]]; then
+      classify_dconf_drift
+      if [[ "$DCONF_DRIFT_COUNT" -gt 0 ]]; then
+        local drifted_list="${DCONF_DRIFTED_AREAS%$'\n'}"
+        drifted_list="${drifted_list//$'\n'/, }"
+        _swarn "${DCONF_DRIFT_COUNT} dconf area(s) out of sync — ${drifted_list}"
+        while IFS= read -r area; do
+          [[ -n "$area" ]] && dim "  gnome/${area}.ini"
+        done <<< "$DCONF_DRIFTED_AREAS"
+      else
+        ok "All ${DCONF_TOTAL} dconf areas in sync"
+      fi
+    else
+      info "gnome/ directory not found (skipped)"
+    fi
+  else
+    info "dconf not installed (skipped)"
   fi
 
   header "Packages"
@@ -725,9 +728,9 @@ cmd_status() {
       else
         local missing
         missing=$(printf '%s\n' "$brew_check_output" | grep -c '^→' || true)
-        warn "Brewfile: ${missing} package(s) missing — run 'install packages' to install"
+        _swarn "Brewfile: ${missing} package(s) missing — run 'install packages' to install"
         printf '%s\n' "$brew_check_output" | grep '^→' | while IFS= read -r line; do
-          info "  ${line#→ }"
+          dim "${line#→ }"
         done
       fi
 
@@ -739,21 +742,31 @@ cmd_status() {
       if [[ "$extras" -eq 0 ]]; then
         ok "Brewfile: no extra packages"
       else
-        warn "Brewfile: ${extras} extra package(s) installed but not in Brewfile"
-        info "  Run 'push packages' to add to Brewfile, or 'brew autoremove' to remove orphaned deps"
+        _swarn "Brewfile: ${extras} extra package(s) installed but not in Brewfile"
+        dim "run 'push packages' to add to Brewfile, or 'brew autoremove' to remove orphaned deps"
         printf '%s\n' "$cleanup_output" | while IFS= read -r line; do
           if [[ "$line" =~ ^Would\  ]]; then
             dim "${line}"
           elif [[ "$line" =~ ^(Run\ |==>\ ) ]]; then
             continue
           elif [[ -n "$line" ]]; then
-            info "  ${line}"
+            dim "${line}"
           fi
         done
       fi
+    else
+      _swarn "Brewfile not found — run 'install dotfiles' to clone the dotfiles repo"
     fi
   else
-    warn "Homebrew not installed"
+    _swarn "Homebrew not installed"
+  fi
+
+  # ── Summary ──
+  echo
+  if [[ "$_status_warns" -eq 0 ]]; then
+    ok "All checks passed"
+  else
+    warn "${_status_warns} issue(s) found"
   fi
 }
 

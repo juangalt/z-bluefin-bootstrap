@@ -16,18 +16,6 @@ mock_hostname() {
 
 # ── Dependencies ────────────────────────────────────────────────────────────
 
-@test "status: shows all required tools available when all present" {
-  mock_hostname "test-box"
-  # Mock all required tools so they are on PATH
-  for tool in brew git jq dconf ssh-agent ssh-add hostnamectl bw chezmoi; do
-    mock_cmd "$tool" 0
-  done
-  run cmd_status
-  assert_success
-  assert_output --partial "All required tools available"
-  assert_output --partial "Optional tools available"
-}
-
 @test "status: warns when required tools are missing" {
   mock_hostname "test-box"
   # Only mock hostname — all other tools absent
@@ -42,11 +30,14 @@ mock_hostname() {
 
 @test "status: shows auto-installable info when missing but brew available" {
   mock_hostname "test-box"
-  # Mock all required tools but not bw/chezmoi
+  # Mock all required tools but not bw/chezmoi; restrict PATH so real ones aren't found
   for tool in brew git jq dconf ssh-agent ssh-add hostnamectl; do
     mock_cmd "$tool" 0
   done
+  local saved_path="$PATH"
+  export PATH="$MOCK_BIN"
   run cmd_status
+  export PATH="$saved_path"
   assert_success
   assert_output --partial "All required tools available"
   assert_output --partial "auto-installed via brew"
@@ -62,23 +53,25 @@ mock_hostname() {
   assert_output --partial "requires brew, which is also missing"
 }
 
-@test "status: shows optional tools available when all present" {
+@test "status: collapses dependencies when all tools present" {
   mock_hostname "test-box"
   for tool in brew git jq dconf ssh-agent ssh-add hostnamectl bw chezmoi; do
     mock_cmd "$tool" 0
   done
   run cmd_status
   assert_success
-  assert_output --partial "Optional tools available (bw, chezmoi"
+  assert_output --partial "All tools available"
+  refute_output --partial "All required tools available"
+  refute_output --partial "Optional tools available"
 }
 
 # ── Hostname ────────────────────────────────────────────────────────────────
 
-@test "status: shows hostname" {
+@test "status: shows hostname in section header" {
   mock_hostname "test-box"
   run cmd_status
   assert_success
-  assert_output --partial "Hostname: test-box"
+  assert_output --partial "System (test-box)"
 }
 
 # ── Tailscale ───────────────────────────────────────────────────────────────
@@ -178,7 +171,6 @@ mock_hostname() {
   mock_chezmoi_for_status clean
   run cmd_status
   assert_success
-  assert_output --partial "chezmoi installed"
   assert_output --partial "all managed files in sync"
   refute_output --partial "template file(s) differ"
 }
@@ -256,12 +248,13 @@ mock_hostname() {
   assert_output --partial "Homebrew not installed"
 }
 
-@test "status: skips brew check when Brewfile is absent" {
+@test "status: warns when Brewfile is absent" {
   mock_hostname "test-box"
   mock_cmd brew 0
   run cmd_status
   assert_success
-  refute_output --partial "Brewfile"
+  assert_output --partial "Brewfile not found"
+  assert_output --partial "install dotfiles"
 }
 
 # ── Dotfiles repo git state ──────────────────────────────────────────────────
@@ -324,7 +317,7 @@ mock_hostname() {
     "/org/gnome/shell/qux=four"
   run cmd_status
   assert_success
-  assert_output --partial "dconf: all 3 GNOME setting area(s) in sync"
+  assert_output --partial "All 3 dconf areas in sync"
 }
 
 @test "status: warns when some dconf areas have drifted" {
@@ -336,7 +329,7 @@ mock_hostname() {
     "/org/gnome/shell/qux=four"
   run cmd_status
   assert_success
-  assert_output --partial "dconf: 1 area(s) out of sync"
+  assert_output --partial "1 dconf area(s) out of sync"
   assert_output --partial "ptyxis"
   assert_output --partial "gnome/ptyxis.ini"
 }
@@ -350,7 +343,7 @@ mock_hostname() {
     "/org/gnome/shell/qux=CHANGED"
   run cmd_status
   assert_success
-  assert_output --partial "dconf: 3 area(s) out of sync"
+  assert_output --partial "3 dconf area(s) out of sync"
 }
 
 @test "status: shows info when dconf is not installed" {
@@ -364,13 +357,13 @@ mock_hostname() {
   assert_output --partial "dconf not installed"
 }
 
-@test "status: silently skips dconf drift check when gnome dir is missing" {
+@test "status: reports when gnome dir is missing" {
   mock_hostname "test-box"
   mkdir -p "$DOTFILES_DIR"
   mock_cmd dconf 0
   run cmd_status
   assert_success
-  refute_output --partial "dconf:"
+  assert_output --partial "gnome/ directory not found"
 }
 
 # ── Extra brew packages ──────────────────────────────────────────────────────
@@ -414,6 +407,58 @@ Run \`brew bundle cleanup --force\` to make these changes."
   run cmd_status
   assert_success
   assert_output --partial "Brewfile: no extra packages"
+}
+
+# ── Summary line ──────────────────────────────────────────────────────────
+
+@test "status: shows 'All checks passed' when no warnings" {
+  mock_hostname "test-box"
+  for tool in brew git jq dconf ssh-agent ssh-add hostnamectl bw chezmoi; do
+    mock_cmd "$tool" 0
+  done
+  mkdir -p "$HOME/.ssh"
+  touch "$HOME/.ssh/github"
+  chmod 600 "$HOME/.ssh/github"
+  printf 'Host github.com\n  IdentityFile ~/.ssh/github\n' > "$HOME/.ssh/config"
+  mock_cmd tailscale 0 "{}"
+  mock_jq_dispatch ".BackendState=Running" ".Self.HostName=ts-node" ".CurrentTailnet.Name=user@example.com"
+  mock_chezmoi_for_status clean
+  setup_gnome_ini_files
+  mock_dconf \
+    "/org/gnome/Ptyxis/foo=one" \
+    "/org/gnome/settings-daemon/plugins/media-keys/baz=three" \
+    "/org/gnome/shell/qux=four"
+  mkdir -p "$DOTFILES_DIR/.git"
+  mock_git_for_status "" ""
+  touch "$DOTFILES_DIR/Brewfile"
+  run cmd_status
+  assert_success
+  assert_output --partial "All checks passed"
+  refute_output --partial "issue(s) found"
+}
+
+@test "status: summary counts warnings accurately" {
+  mock_hostname "test-box"
+  # Set up an environment with exactly 2 warnings: SSH key + SSH config
+  for tool in brew git jq dconf ssh-agent ssh-add hostnamectl bw chezmoi; do
+    mock_cmd "$tool" 0
+  done
+  mock_cmd tailscale 0 "{}"
+  mock_jq_dispatch ".BackendState=Running" ".Self.HostName=ts-node" ".CurrentTailnet.Name=user@example.com"
+  mock_chezmoi_for_status clean
+  setup_gnome_ini_files
+  mock_dconf \
+    "/org/gnome/Ptyxis/foo=one" \
+    "/org/gnome/settings-daemon/plugins/media-keys/baz=three" \
+    "/org/gnome/shell/qux=four"
+  mkdir -p "$DOTFILES_DIR/.git"
+  mock_git_for_status "" ""
+  touch "$DOTFILES_DIR/Brewfile"
+  # No SSH key, no SSH config → exactly 2 warnings
+  run cmd_status
+  assert_success
+  assert_output --partial "2 issue(s) found"
+  refute_output --partial "All checks passed"
 }
 
 # ── Unknown arguments ──────────────────────────────────────────────────────
