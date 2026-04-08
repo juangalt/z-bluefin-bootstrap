@@ -33,6 +33,7 @@ lsblk /dev/sda
 # Unmount any mounted partitions (adjust paths as needed)
 sudo umount /dev/sda1
 sudo umount /dev/sda2
+sudo umount /dev/sda3
 
 # If there's an active LUKS volume, close it
 sudo cryptsetup close <mapper-name>
@@ -72,25 +73,31 @@ sudo podman run --rm --privileged --pid=host -v /dev:/dev -v /var/lib/containers
 
 `bootc install to-disk` only supports `tpm2-luks` (bound to a specific machine), not passphrase-based LUKS. For a portable encrypted USB, manually set up partitions and LUKS first, then install with `bootc install to-existing-root`.
 
+LUKS with GRUB requires a **separate unencrypted `/boot` partition** — GRUB cannot unlock LUKS to read the kernel and initramfs.
+
 #### 4B.1. Partition the USB
+
+Three partitions: EFI, boot (unencrypted), and LUKS root.
 
 ```bash
 sudo parted /dev/sda -- mklabel gpt
 sudo parted /dev/sda -- mkpart EFI fat32 1MiB 513MiB
 sudo parted /dev/sda -- set 1 esp on
-sudo parted /dev/sda -- mkpart root 513MiB 100%
+sudo parted /dev/sda -- mkpart boot ext4 513MiB 1537MiB
+sudo parted /dev/sda -- mkpart root 1537MiB 100%
 ```
 
-#### 4B.2. Format the EFI partition
+#### 4B.2. Format EFI and boot partitions
 
 ```bash
 sudo mkfs.fat -F32 /dev/sda1
+sudo mkfs.ext4 /dev/sda2
 ```
 
 #### 4B.3. Set up LUKS on the root partition
 
 ```bash
-sudo cryptsetup luksFormat /dev/sda2
+sudo cryptsetup luksFormat /dev/sda3
 ```
 
 Type **`YES`** (all caps) when prompted, then enter and verify your passphrase.
@@ -98,9 +105,11 @@ Type **`YES`** (all caps) when prompted, then enter and verify your passphrase.
 #### 4B.4. Open, format, and mount
 
 ```bash
-sudo cryptsetup open /dev/sda2 usb-root
+sudo cryptsetup open /dev/sda3 usb-root
 sudo mkfs.xfs /dev/mapper/usb-root
 sudo mount /dev/mapper/usb-root /mnt
+sudo mkdir -p /mnt/boot
+sudo mount /dev/sda2 /mnt/boot
 sudo mkdir -p /mnt/boot/efi
 sudo mount /dev/sda1 /mnt/boot/efi
 ```
@@ -111,61 +120,62 @@ sudo mount /dev/sda1 /mnt/boot/efi
 sudo podman run --rm --privileged --pid=host -v /dev:/dev -v /mnt:/target -v /var/lib/containers:/var/lib/containers --security-opt label=disable ghcr.io/ublue-os/bluefin-dx:stable bootc install to-existing-root /target
 ```
 
+> **Fish shell note:** Fish does not support `\` line continuation the same way bash does. Always paste podman commands as a **single line**.
+
 #### 4B.6. Fix boot entry UUIDs
 
-`bootc install to-existing-root` incorrectly writes the **host machine's** LUKS and root UUIDs into the USB's boot entry. You must fix these before the USB will boot.
-
-Get the correct UUIDs:
+`bootc install to-existing-root` writes the **host machine's** UUIDs into the USB's boot entry instead of the USB's own UUIDs. The following script detects and fixes this automatically:
 
 ```bash
-sudo lsblk -o NAME,UUID,FSTYPE /dev/sda
-```
+USB_LUKS_UUID=$(sudo blkid -s UUID -o value /dev/sda3)
+USB_ROOT_UUID=$(sudo blkid -s UUID -o value /dev/mapper/usb-root)
+USB_BOOT_UUID=$(sudo blkid -s UUID -o value /dev/sda2)
 
-Example output:
+# Abort if any UUID is missing
+if [ -z "$USB_LUKS_UUID" ] || [ -z "$USB_ROOT_UUID" ] || [ -z "$USB_BOOT_UUID" ]; then
+  echo "ERROR: Failed to read USB UUIDs. Check that LUKS is open and partitions exist." >&2
+  exit 1
+fi
 
-```
-NAME            UUID                                 FSTYPE
-sda
-├─sda1          AE07-1C74                            vfat
-└─sda2          aaaa-bbbb-cccc-dddd                  crypto_LUKS
-  └─usb-root   xxxx-yyyy-zzzz-wwww                  xfs
-```
+BOOT_ENTRY=/mnt/boot/loader.1/entries/ostree-1.conf
+if [ ! -f "$BOOT_ENTRY" ]; then
+  echo "ERROR: Boot entry not found at $BOOT_ENTRY" >&2
+  exit 1
+fi
 
-You need two values:
-- **LUKS UUID** — the UUID of `sda2` (the `crypto_LUKS` line)
-- **Root UUID** — the UUID of the xfs filesystem inside the LUKS volume
+CURRENT_LUKS=$(grep -oP 'rd\.luks\.uuid=luks-\K[^ ]+' "$BOOT_ENTRY")
+CURRENT_ROOT=$(grep -oP 'root=UUID=\K[^ ]+' "$BOOT_ENTRY")
 
-Now get the wrong UUIDs currently in the boot entry:
+if [ -z "$CURRENT_LUKS" ] || [ -z "$CURRENT_ROOT" ]; then
+  echo "ERROR: Could not extract current UUIDs from boot entry." >&2
+  exit 1
+fi
 
-```bash
-sudo cat /mnt/boot/loader.1/entries/ostree-1.conf
-```
+# Replace host UUIDs with USB UUIDs, remove btrfs rootflags
+sudo sed -i \
+  -e "s/rd.luks.uuid=luks-${CURRENT_LUKS}/rd.luks.uuid=luks-${USB_LUKS_UUID}/" \
+  -e "s/root=UUID=${CURRENT_ROOT}/root=UUID=${USB_ROOT_UUID}/" \
+  -e 's/ rootflags=subvol=root//' \
+  "$BOOT_ENTRY"
 
-Look at the `options` line for `rd.luks.uuid=luks-<WRONG>` and `root=UUID=<WRONG>`.
+# Fix BOOT_UUID in grub so it finds the /boot partition
+sudo sed -i "s/set BOOT_UUID=\".*\"/set BOOT_UUID=\"${USB_BOOT_UUID}\"/" \
+  /mnt/boot/efi/EFI/fedora/bootuuid.cfg \
+  /mnt/boot/grub2/bootuuid.cfg
 
-Replace them (substitute your actual UUIDs):
-
-```bash
-sudo sed -i -e 's/rd.luks.uuid=luks-<HOST_LUKS_UUID>/rd.luks.uuid=luks-<USB_LUKS_UUID>/' -e 's/root=UUID=<HOST_ROOT_UUID>/root=UUID=<USB_ROOT_UUID>/' -e 's/ rootflags=subvol=root//' /mnt/boot/loader.1/entries/ostree-1.conf
-```
-
-The `rootflags=subvol=root` removal is needed because it's a btrfs flag and the USB uses xfs.
-
-Verify the fix:
-
-```bash
-sudo cat /mnt/boot/loader.1/entries/ostree-1.conf
+# Verify
+cat "$BOOT_ENTRY"
+cat /mnt/boot/efi/EFI/fedora/bootuuid.cfg
 ```
 
 #### 4B.7. Clean up
 
 ```bash
 sudo umount /mnt/boot/efi
+sudo umount /mnt/boot
 sudo umount /mnt
 sudo cryptsetup close usb-root
 ```
-
-> **Fish shell note:** Fish does not support `\` line continuation the same way bash does. Always paste podman commands as a **single line**.
 
 ## 5. Boot from the USB
 
@@ -193,9 +203,13 @@ The podman command is being split across lines incorrectly. Make sure the entire
 
 A stale LUKS mapping is lingering from a previous attempt. Try `sudo dmsetup remove -f usb-root`. If that fails, unplug and replug the USB — the stale mapping will be cleared. After replugging, re-check `lsblk` as the device name may change.
 
-### USB boots to GRUB but fails to find root / asks for wrong LUKS passphrase
+### Black screen / "disk not available" after selecting USB
 
-`bootc install to-existing-root` writes the host machine's UUIDs into the boot entry instead of the USB's. See step 4B.6 to fix. You can also edit the GRUB command line at boot time (press `e` on the GRUB menu) to temporarily change the UUIDs.
+GRUB cannot unlock LUKS, so `/boot` must be on a separate unencrypted partition. If you only have two partitions (EFI + LUKS root), GRUB can't find the kernel. Re-partition with three partitions as described in Option B.
+
+### Boot entry has wrong UUIDs
+
+`bootc install to-existing-root` writes the host machine's UUIDs into the boot entry instead of the USB's. Run the fix script in step 4B.6. You can also edit the GRUB command line at boot time (press `e` on the GRUB menu) to temporarily change the UUIDs.
 
 ### USB not showing in boot menu
 
