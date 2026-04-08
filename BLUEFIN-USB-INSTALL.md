@@ -111,7 +111,53 @@ sudo mount /dev/sda1 /mnt/boot/efi
 sudo podman run --rm --privileged --pid=host -v /dev:/dev -v /mnt:/target -v /var/lib/containers:/var/lib/containers --security-opt label=disable ghcr.io/ublue-os/bluefin-dx:stable bootc install to-existing-root /target
 ```
 
-#### 4B.6. Clean up
+#### 4B.6. Fix boot entry UUIDs
+
+`bootc install to-existing-root` incorrectly writes the **host machine's** LUKS and root UUIDs into the USB's boot entry. You must fix these before the USB will boot.
+
+Get the correct UUIDs:
+
+```bash
+sudo lsblk -o NAME,UUID,FSTYPE /dev/sda
+```
+
+Example output:
+
+```
+NAME            UUID                                 FSTYPE
+sda
+├─sda1          AE07-1C74                            vfat
+└─sda2          aaaa-bbbb-cccc-dddd                  crypto_LUKS
+  └─usb-root   xxxx-yyyy-zzzz-wwww                  xfs
+```
+
+You need two values:
+- **LUKS UUID** — the UUID of `sda2` (the `crypto_LUKS` line)
+- **Root UUID** — the UUID of the xfs filesystem inside the LUKS volume
+
+Now get the wrong UUIDs currently in the boot entry:
+
+```bash
+sudo cat /mnt/boot/loader.1/entries/ostree-1.conf
+```
+
+Look at the `options` line for `rd.luks.uuid=luks-<WRONG>` and `root=UUID=<WRONG>`.
+
+Replace them (substitute your actual UUIDs):
+
+```bash
+sudo sed -i -e 's/rd.luks.uuid=luks-<HOST_LUKS_UUID>/rd.luks.uuid=luks-<USB_LUKS_UUID>/' -e 's/root=UUID=<HOST_ROOT_UUID>/root=UUID=<USB_ROOT_UUID>/' -e 's/ rootflags=subvol=root//' /mnt/boot/loader.1/entries/ostree-1.conf
+```
+
+The `rootflags=subvol=root` removal is needed because it's a btrfs flag and the USB uses xfs.
+
+Verify the fix:
+
+```bash
+sudo cat /mnt/boot/loader.1/entries/ostree-1.conf
+```
+
+#### 4B.7. Clean up
 
 ```bash
 sudo umount /mnt/boot/efi
@@ -146,6 +192,10 @@ The podman command is being split across lines incorrectly. Make sure the entire
 ### "Device usb-root already exists" / "Device or resource busy"
 
 A stale LUKS mapping is lingering from a previous attempt. Try `sudo dmsetup remove -f usb-root`. If that fails, unplug and replug the USB — the stale mapping will be cleared. After replugging, re-check `lsblk` as the device name may change.
+
+### USB boots to GRUB but fails to find root / asks for wrong LUKS passphrase
+
+`bootc install to-existing-root` writes the host machine's UUIDs into the boot entry instead of the USB's. See step 4B.6 to fix. You can also edit the GRUB command line at boot time (press `e` on the GRUB menu) to temporarily change the UUIDs.
 
 ### USB not showing in boot menu
 
