@@ -134,22 +134,34 @@ USB_BOOT_UUID=$(sudo blkid -s UUID -o value /dev/sda2)
 # Abort if any UUID is missing
 if [ -z "$USB_LUKS_UUID" ] || [ -z "$USB_ROOT_UUID" ] || [ -z "$USB_BOOT_UUID" ]; then
   echo "ERROR: Failed to read USB UUIDs. Check that LUKS is open and partitions exist." >&2
+  echo "  LUKS UUID: ${USB_LUKS_UUID:-(not found)}"
+  echo "  Root UUID: ${USB_ROOT_UUID:-(not found)}"
+  echo "  Boot UUID: ${USB_BOOT_UUID:-(not found)}"
   exit 1
 fi
 
-BOOT_ENTRY=/mnt/boot/loader.1/entries/ostree-1.conf
-if [ ! -f "$BOOT_ENTRY" ]; then
-  echo "ERROR: Boot entry not found at $BOOT_ENTRY" >&2
+# Find the boot entry via the loader symlink (ostree alternates between
+# loader.0 and loader.1; the loader symlink always points to the active one)
+BOOT_ENTRY=$(find /mnt/boot/loader/entries -name 'ostree-*.conf' -print -quit 2>/dev/null)
+if [ -z "$BOOT_ENTRY" ] || [ ! -f "$BOOT_ENTRY" ]; then
+  echo "ERROR: No ostree boot entry found under /mnt/boot/loader/entries/" >&2
+  ls -la /mnt/boot/loader*/entries/ >&2 2>&1
   exit 1
 fi
+
+echo "Boot entry: $BOOT_ENTRY"
 
 CURRENT_LUKS=$(grep -oP 'rd\.luks\.uuid=luks-\K[^ ]+' "$BOOT_ENTRY")
 CURRENT_ROOT=$(grep -oP 'root=UUID=\K[^ ]+' "$BOOT_ENTRY")
 
 if [ -z "$CURRENT_LUKS" ] || [ -z "$CURRENT_ROOT" ]; then
   echo "ERROR: Could not extract current UUIDs from boot entry." >&2
+  cat "$BOOT_ENTRY"
   exit 1
 fi
+
+echo "Replacing LUKS UUID: $CURRENT_LUKS -> $USB_LUKS_UUID"
+echo "Replacing root UUID: $CURRENT_ROOT -> $USB_ROOT_UUID"
 
 # Replace host UUIDs with USB UUIDs, remove btrfs rootflags
 sudo sed -i \
@@ -164,7 +176,11 @@ sudo sed -i "s/set BOOT_UUID=\".*\"/set BOOT_UUID=\"${USB_BOOT_UUID}\"/" \
   /mnt/boot/grub2/bootuuid.cfg
 
 # Verify
+echo ""
+echo "=== Boot entry (should show USB UUIDs) ==="
 cat "$BOOT_ENTRY"
+echo ""
+echo "=== bootuuid.cfg ==="
 cat /mnt/boot/efi/EFI/fedora/bootuuid.cfg
 ```
 
