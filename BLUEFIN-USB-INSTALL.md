@@ -209,6 +209,73 @@ cd z-bluefin-bootstrap
 ./z-bluefin-bootstrap.sh install all
 ```
 
+## 7. Performance tuning (recommended for all USB installs)
+
+Even on fast USB 3.x drives, a few kernel defaults are wrong for a USB-backed install and are worth fixing once. These are persistent and survive reboots.
+
+### 7.1. I/O scheduler + rotational flag
+
+Many USB flash drives (and NVMe-in-USB enclosures) report `rotational=1`, which causes the kernel to pick the HDD-tuned `bfq` scheduler. Switch to `mq-deadline` with a larger read-ahead:
+
+```bash
+sudo tee /etc/udev/rules.d/60-usb-flash.rules <<'EOF'
+# Tune USB mass-storage devices for flash behavior.
+ACTION=="add|change", KERNEL=="sd[a-z]", SUBSYSTEMS=="usb", ATTR{queue/rotational}="0", ATTR{queue/scheduler}="mq-deadline", ATTR{queue/read_ahead_kb}="1024"
+EOF
+
+sudo udevadm control --reload
+sudo udevadm trigger --subsystem-match=block --action=change
+```
+
+Verify (substitute your USB device for `sda`):
+
+```bash
+cat /sys/block/sda/queue/rotational   # → 0
+cat /sys/block/sda/queue/scheduler    # → [mq-deadline]
+cat /sys/block/sda/queue/read_ahead_kb # → 1024
+```
+
+### 7.2. Bound write-back buffering in absolute bytes
+
+By default, Linux permits up to `vm.dirty_ratio=40%` of RAM to be dirty pages before forcing writeback. On a machine with 32 GiB RAM and a USB 2.0 drive (~40 MB/s), that is ~12 GiB of pending writes — which takes **~5 minutes** to flush and causes multi-minute I/O stalls whenever the kernel finally forces a sync.
+
+Cap it in absolute bytes instead:
+
+```bash
+sudo tee /etc/sysctl.d/90-usb-writeback.conf <<'EOF'
+# Bound dirty page cache in absolute bytes, not percent of RAM.
+# Worst-case flush on a 40 MB/s USB2 device is ~6 s instead of minutes.
+vm.dirty_background_bytes = 67108864
+vm.dirty_bytes            = 268435456
+vm.dirty_expire_centisecs = 3000
+vm.dirty_writeback_centisecs = 500
+EOF
+
+sudo sysctl --system
+```
+
+Verify:
+
+```bash
+sysctl vm.dirty_bytes vm.dirty_background_bytes
+# vm.dirty_bytes = 268435456
+# vm.dirty_background_bytes = 67108864
+```
+
+Note: setting `dirty_bytes` automatically makes `dirty_ratio` read as `0`, and vice versa. This is expected — they are mutually exclusive views of the same cap.
+
+### 7.3. Keep `/sysroot` below ~80% full
+
+XFS (and ostree) slow down sharply past ~90% full. On a USB install you only have so much room, so prune regularly:
+
+```bash
+sudo rpm-ostree cleanup -rpbm   # drop rollback + pending + metadata
+brew cleanup -s --prune=all     # Homebrew caches are often hundreds of MB
+flatpak uninstall --unused -y   # orphaned runtimes
+```
+
+Check the ratio with `df -h /sysroot`. If `/var/lib/flatpak` is ballooning, review installed apps with `flatpak list --columns=name,size` and uninstall anything you don't actually use.
+
 ## Troubleshooting
 
 ### "requires at least 1 arg(s)" from podman
@@ -234,3 +301,15 @@ Some BIOS/UEFI implementations require Secure Boot to be disabled for non-signed
 ### Slow performance
 
 USB 3.0+ is strongly recommended. USB 2.0 drives will work but the system will feel sluggish. An NVMe-to-USB enclosure with a small NVMe drive gives the best portable experience.
+
+Confirm whether your drive is actually negotiating USB 3 speeds:
+
+```bash
+lsusb -t                                       # look for the bus your drive is on
+udevadm info --query=property --name=/dev/sda | grep ID_USB_REVISION
+```
+
+- `480M` / `ID_USB_REVISION=0200` → USB 2.0 (hard ceiling ~30–40 MB/s). No software tuning will overcome this — replace the drive.
+- `5000M` / `10000M` → USB 3.x, on a USB 3 port. Software tuning actually helps.
+
+Also apply the persistent tuning in [section 7](#7-performance-tuning-recommended-for-all-usb-installs). The `mq-deadline` scheduler and `vm.dirty_bytes` caps make a noticeable difference on slow drives by keeping worst-case flush stalls short (~6 s instead of multiple minutes).
