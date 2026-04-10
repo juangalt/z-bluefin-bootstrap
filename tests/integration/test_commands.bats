@@ -147,7 +147,7 @@ setup() {
   mock_cmd hostname 0 "int-test-box"
   run bash "$BOOTSTRAP" status
   assert_success
-  assert_output --partial "System (int-test-box)"
+  assert_output --partial "Hostname: int-test-box"
 }
 
 @test "help: shows status and set-hostname commands" {

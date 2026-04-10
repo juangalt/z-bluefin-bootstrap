@@ -67,30 +67,33 @@ mock_hostname() {
 
 # ── Hostname ────────────────────────────────────────────────────────────────
 
-@test "status: shows hostname in section header" {
+@test "status: shows hostname as its own System check line" {
   mock_hostname "test-box"
   run cmd_status
   assert_success
-  assert_output --partial "System (test-box)"
+  assert_output --partial "Hostname: test-box"
 }
 
 # ── Tailscale ───────────────────────────────────────────────────────────────
 
-@test "status: shows tailscale connected with hostname and account" {
+@test "status: shows tailscale connected with tailnet hostname and account" {
   mock_hostname "test-box"
   mock_cmd tailscale 0 "{}"
-  mock_jq_dispatch ".BackendState=Running" ".Self.HostName=ts-node" ".CurrentTailnet.Name=user@example.com"
+  mock_jq_dispatch ".BackendState=Running" ".Self.DNSName=ts-node.tailnet-xyz.ts.net." ".CurrentTailnet.Name=user@example.com"
   run cmd_status
   assert_success
   assert_output --partial "Tailscale connected"
-  assert_output --partial "ts-node"
+  # The trailing comma validates dot-stripping: raw DNSName ends in ".",
+  # so without ${var%.} the output would be "ts.net., account" and this
+  # substring match would fail.
+  assert_output --partial "tailnet hostname: ts-node.tailnet-xyz.ts.net,"
   assert_output --partial "user@example.com"
 }
 
 @test "status: warns when tailscale is running but not connected" {
   mock_hostname "test-box"
   mock_cmd tailscale 0 "{}"
-  mock_jq_dispatch ".BackendState=NeedsLogin" ".Self.HostName=unknown" ".CurrentTailnet.Name=unknown"
+  mock_jq_dispatch ".BackendState=NeedsLogin" ".Self.DNSName=unknown" ".CurrentTailnet.Name=unknown"
   run cmd_status
   assert_success
   assert_output --partial "Tailscale running but not connected to a tailnet"
@@ -436,7 +439,7 @@ Run \`brew bundle cleanup --force\` to make these changes."
   chmod 600 "$HOME/.ssh/github"
   printf 'Host github.com\n  IdentityFile ~/.ssh/github\n' > "$HOME/.ssh/config"
   mock_cmd tailscale 0 "{}"
-  mock_jq_dispatch ".BackendState=Running" ".Self.HostName=ts-node" ".CurrentTailnet.Name=user@example.com"
+  mock_jq_dispatch ".BackendState=Running" ".Self.DNSName=ts-node.tailnet-xyz.ts.net." ".CurrentTailnet.Name=user@example.com"
   mock_chezmoi_for_status clean
   setup_gnome_ini_files
   mock_dconf \
@@ -459,7 +462,7 @@ Run \`brew bundle cleanup --force\` to make these changes."
     mock_cmd "$tool" 0
   done
   mock_cmd tailscale 0 "{}"
-  mock_jq_dispatch ".BackendState=Running" ".Self.HostName=ts-node" ".CurrentTailnet.Name=user@example.com"
+  mock_jq_dispatch ".BackendState=Running" ".Self.DNSName=ts-node.tailnet-xyz.ts.net." ".CurrentTailnet.Name=user@example.com"
   mock_chezmoi_for_status clean
   setup_gnome_ini_files
   mock_dconf \

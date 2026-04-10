@@ -610,18 +610,21 @@ cmd_status() {
     fi
   fi
 
-  header "System ($(hostname 2>/dev/null || echo 'unknown'))"
+  header "System"
+
+  ok "Hostname: $(hostname 2>/dev/null || echo 'unknown')"
 
   # Tailscale
   if have tailscale; then
     local ts_json
     if ts_json=$(tailscale status --json 2>/dev/null); then
-      local ts_state ts_host ts_tailnet
+      local ts_state ts_dns ts_tailnet
       ts_state=$(printf '%s' "$ts_json" | jq -r '.BackendState // "unknown"')
-      ts_host=$(printf '%s' "$ts_json" | jq -r '.Self.HostName // "unknown"')
+      ts_dns=$(printf '%s' "$ts_json" | jq -r '.Self.DNSName // "unknown"')
       ts_tailnet=$(printf '%s' "$ts_json" | jq -r '.CurrentTailnet.Name // "unknown"')
+      ts_dns="${ts_dns%.}"  # MagicDNS FQDNs carry a trailing dot
       if [[ "$ts_state" == "Running" ]]; then
-        ok "Tailscale connected — hostname: ${ts_host}, account: ${ts_tailnet}"
+        ok "Tailscale connected — tailnet hostname: ${ts_dns}, account: ${ts_tailnet}"
       else
         _swarn "Tailscale running but not connected to a tailnet"
       fi
