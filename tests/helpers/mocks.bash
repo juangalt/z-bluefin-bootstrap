@@ -272,3 +272,29 @@ mock_dconf() {
   } > "$MOCK_BIN/dconf"
   chmod +x "$MOCK_BIN/dconf"
 }
+
+# Mock sudo as a transparent passthrough: `sudo foo a b` runs `foo a b`.
+mock_sudo_passthrough() {
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'exec "$@"\n'
+  } > "$MOCK_BIN/sudo"
+  chmod +x "$MOCK_BIN/sudo"
+}
+
+# Mock tailscale: `status` exits with $1, `set` exits with $2, all calls captured.
+# Capture file: $BATS_TEST_TMPDIR/tailscale.calls
+# Usage: mock_tailscale STATUS_RC SET_RC
+mock_tailscale() {
+  local status_rc="${1:-0}" set_rc="${2:-0}"
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'printf "%%s\\n" "$*" >> %q\n' "$BATS_TEST_TMPDIR/tailscale.calls"
+    printf 'case "$1" in\n'
+    printf '  status) exit %s ;;\n' "$status_rc"
+    printf '  set)    exit %s ;;\n' "$set_rc"
+    printf '  *) exit 0 ;;\n'
+    printf 'esac\n'
+  } > "$MOCK_BIN/tailscale"
+  chmod +x "$MOCK_BIN/tailscale"
+}

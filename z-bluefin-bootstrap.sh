@@ -519,7 +519,7 @@ cmd_help() {
   echo
   echo -e "${BOLD}Commands${RESET} ${DIM}(in typical setup order)${RESET}"
   echo -e "  ${CYAN}status${RESET}                Show current state (SSH, dotfiles, chezmoi drift, dconf drift, brew)"
-  echo -e "  ${CYAN}set-hostname${RESET} <name>   Set the system hostname via hostnamectl"
+  echo -e "  ${CYAN}set-hostname${RESET} <name>   Set the system hostname (and refresh Tailscale device name)"
   echo -e "  ${CYAN}install github-key${RESET}    Save GitHub SSH key to ~/.ssh/github ${DIM}(requires Bitwarden)${RESET}"
   echo -e "  ${CYAN}install dotfiles${RESET}      Clone z-bluefin-dotfiles and apply config files with chezmoi"
   echo -e "  ${CYAN}install packages${RESET}      Install brew packages and flatpaks from Brewfile"
@@ -807,6 +807,23 @@ cmd_set_hostname() {
   hostnamectl set-hostname "$new_hostname" \
     || die "hostnamectl set-hostname failed"
   ok "Hostname set to '${new_hostname}'"
+
+  # Sync new hostname to Tailscale (best-effort, optional dependency).
+  # tailscaled reads the OS hostname only at daemon start, so we push the
+  # new name via `tailscale set` to avoid a daemon restart and to clear any
+  # manual override on the control plane.
+  if have tailscale; then
+    if tailscale status --json &>/dev/null; then
+      info "Refreshing Tailscale device name..."
+      if sudo tailscale set --hostname="$new_hostname"; then
+        ok "Tailscale device name updated to '${new_hostname}'"
+      else
+        warn "Failed to update Tailscale device name — run 'sudo tailscale set --hostname=${new_hostname}' manually"
+      fi
+    else
+      info "Tailscale installed but not running — new hostname will apply on next start"
+    fi
+  fi
 }
 
 cmd_install_github_key() {
