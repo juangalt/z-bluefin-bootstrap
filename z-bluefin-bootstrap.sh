@@ -726,12 +726,40 @@ cmd_status() {
       if brew_check_output=$(brew bundle check --file="$brewfile" --no-upgrade --verbose 2>/dev/null); then
         ok "Brewfile: all packages installed"
       else
-        local missing
-        missing=$(printf '%s\n' "$brew_check_output" | grep -c '^→' || true)
-        _swarn "Brewfile: ${missing} package(s) missing — run 'install packages' to install"
-        printf '%s\n' "$brew_check_output" | grep '^→' | while IFS= read -r line; do
-          dim "${line#→ }"
-        done
+        # Cache installed lists once — avoids one `brew list` subprocess per drifted entry.
+        local installed_formulae installed_casks
+        installed_formulae=$(brew list --formula -1 2>/dev/null || true)
+        installed_casks=$(brew list --cask -1 2>/dev/null || true)
+
+        local truly_missing=() not_on_request=()
+        local line kind name list d
+        while IFS= read -r line; do
+          [[ "$line" =~ ^→\  ]] || continue
+          if [[ "$line" =~ ^→\ (Formula|Cask)\ ([^ ]+)\  ]]; then
+            kind="${BASH_REMATCH[1]}"
+            name="${BASH_REMATCH[2]}"
+            [[ "$kind" == "Formula" ]] && list="$installed_formulae" || list="$installed_casks"
+            if [[ $'\n'"$list"$'\n' == *$'\n'"$name"$'\n'* ]]; then
+              not_on_request+=("${line#→ }")
+            else
+              truly_missing+=("${line#→ }")
+            fi
+          else
+            truly_missing+=("${line#→ }")
+          fi
+        done < <(printf '%s\n' "$brew_check_output" | grep '^→')
+
+        if ((${#truly_missing[@]} == 0 && ${#not_on_request[@]} == 0)); then
+          _swarn "Brewfile: brew bundle check reported drift — run 'install packages'"
+        fi
+        if ((${#truly_missing[@]} > 0)); then
+          _swarn "Brewfile: ${#truly_missing[@]} package(s) missing — run 'install packages' to install"
+          for d in "${truly_missing[@]}"; do dim "$d"; done
+        fi
+        if ((${#not_on_request[@]} > 0)); then
+          _swarn "Brewfile: ${#not_on_request[@]} package(s) present but not tracked as on-request — run 'install packages' to update brew metadata"
+          for d in "${not_on_request[@]}"; do dim "$d"; done
+        fi
       fi
 
       # ── Extras: installed but not in Brewfile ──

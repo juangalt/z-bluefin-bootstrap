@@ -214,16 +214,25 @@ mock_git_for_status() {
 # $3 = exit code for `brew bundle cleanup` (0 = no extras, 1 = extras found)
 # $4 = stdout for `brew bundle cleanup` (optional)
 mock_brew_for_status() {
-  local check_rc="${1:-0}" check_output="${2:-}" cleanup_rc="${3:-0}" cleanup_output="${4:-}"
+  local check_rc="${1:-0}" check_output="${2:-}" \
+        cleanup_rc="${3:-0}" cleanup_output="${4:-}" \
+        present_names="${5:-}"
   {
     printf '#!/usr/bin/env bash\n'
-    printf 'case "$2" in\n'
-    printf '  check)\n'
-    [[ -n "$check_output" ]] && printf '    printf "%%s\\n" %q\n' "$check_output"
-    printf '    exit %s ;;\n' "$check_rc"
-    printf '  cleanup)\n'
-    [[ -n "$cleanup_output" ]] && printf '    printf "%%s\\n" %q\n' "$cleanup_output"
-    printf '    exit %s ;;\n' "$cleanup_rc"
+    printf 'case "$1" in\n'
+    printf '  bundle)\n'
+    printf '    case "$2" in\n'
+    printf '      check)\n'
+    [[ -n "$check_output" ]] && printf '        printf "%%s\\n" %q\n' "$check_output"
+    printf '        exit %s ;;\n' "$check_rc"
+    printf '      cleanup)\n'
+    [[ -n "$cleanup_output" ]] && printf '        printf "%%s\\n" %q\n' "$cleanup_output"
+    printf '        exit %s ;;\n' "$cleanup_rc"
+    printf '      *) exit 0 ;;\n'
+    printf '    esac ;;\n'
+    printf '  list)\n'
+    [[ -n "$present_names" ]] && printf '    printf "%%s\\n" %s\n' "$present_names"
+    printf '    exit 0 ;;\n'
     printf '  *) exit 0 ;;\n'
     printf 'esac\n'
   } > "$MOCK_BIN/brew"

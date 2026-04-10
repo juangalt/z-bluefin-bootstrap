@@ -238,6 +238,21 @@ mock_hostname() {
   assert_output --partial "claude-code"
 }
 
+@test "status: warns when brew packages are present but not on-request" {
+  mock_hostname "test-box"
+  local check_out
+  check_out="brew bundle can't satisfy your Brewfile's dependencies.
+→ Formula ncdu needs to be installed."
+  mock_brew_for_status 1 "$check_out" 0 "" "ncdu"
+  mkdir -p "$DOTFILES_DIR"
+  touch "$DOTFILES_DIR/Brewfile"
+  run cmd_status
+  assert_success
+  assert_output --partial "1 package(s) present but not tracked as on-request"
+  assert_output --partial "ncdu"
+  refute_output --partial "package(s) missing"
+}
+
 @test "status: warns when brew is not installed" {
   mock_hostname "test-box"
   local saved_path="$PATH"
