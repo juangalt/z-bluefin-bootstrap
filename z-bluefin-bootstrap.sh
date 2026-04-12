@@ -28,6 +28,20 @@ require() {
   have "$1" || die "Required tool not found: $1"
 }
 
+# Check whether resolved SSH config maps github.com (or a github alias) to an
+# IdentityFile whose path contains "github".  Uses `ssh -G` so Include
+# directives, Host aliases, and wildcards are all honoured.
+ssh_config_has_github() {
+  have ssh || return 1
+  local host
+  for host in github.com github; do
+    if ssh -G "$host" 2>/dev/null | grep -qi '^identityfile.*github'; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 # ── Configuration ─────────────────────────────────────────────────────────────
 DOTFILES_REPO="git@github.com:juangalt/z-bluefin-dotfiles.git"
 DOTFILES_DIR="$HOME/z-bluefin-dotfiles"
@@ -106,7 +120,7 @@ save_github_key() {
 
   # Ensure SSH uses this key for github.com without needing ssh-agent
   local ssh_config="$HOME/.ssh/config"
-  if ! grep -q "Host github.com" "$ssh_config" 2>/dev/null; then
+  if ! ssh_config_has_github; then
     (umask 077; printf '\nHost github.com\n  IdentityFile ~/.ssh/github\n' >> "$ssh_config")
     ok "SSH config updated for github.com"
   fi
@@ -651,10 +665,10 @@ cmd_status() {
   fi
 
   # SSH config
-  if grep -q "Host github.com" "$HOME/.ssh/config" 2>/dev/null; then
+  if ssh_config_has_github; then
     ok "SSH config has github.com entry"
   else
-    _swarn "No github.com entry in ~/.ssh/config — run 'install github-key'"
+    _swarn "No SSH config found for github.com — run 'install github-key'"
   fi
 
   header "Dotfiles"

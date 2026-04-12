@@ -9,6 +9,7 @@ setup() {
   isolate_environment
   setup_mock_bin
   DOTFILES_DIR="$HOME/z-bluefin-dotfiles"
+  mock_ssh_for_github none
 }
 
 # ── help ─────────────────────────────────────────────────────────────────────

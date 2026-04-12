@@ -7,6 +7,7 @@ setup() {
   isolate_environment
   setup_mock_bin
   load_bootstrap_functions
+  mock_ssh_for_github none
 }
 
 # ── Tool/precondition tests ──────────────────────────────────────────────────
@@ -124,8 +125,17 @@ setup() {
   mock_bw_status unlocked
   mock_jq_value "-----BEGIN OPENSSH PRIVATE KEY-----"
   export BW_SESSION="fake"
-  mkdir -p "$HOME/.ssh"
-  printf 'Host github.com\n  IdentityFile ~/.ssh/github\n' > "$HOME/.ssh/config"
+  mock_ssh_for_github direct
+  run save_github_key
+  assert_success
+  refute_output --partial "SSH config updated"
+}
+
+@test "save_github_key: skips ssh config when alias configures github" {
+  mock_bw_status unlocked
+  mock_jq_value "-----BEGIN OPENSSH PRIVATE KEY-----"
+  export BW_SESSION="fake"
+  mock_ssh_for_github alias
   run save_github_key
   assert_success
   refute_output --partial "SSH config updated"

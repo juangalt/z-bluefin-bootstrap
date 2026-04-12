@@ -251,6 +251,35 @@ mock_ssh_agent() {
   chmod +x "$MOCK_BIN/ssh-agent"
 }
 
+# Write an ssh mock that responds to `ssh -G <host>` for github config detection.
+# Usage: mock_ssh_for_github MODE
+#   direct — Host github.com with IdentityFile ~/.ssh/github
+#   alias  — Host github alias with IdentityFile ~/.ssh/svc-github
+#   none   — no github-specific SSH config (only default keys)
+mock_ssh_for_github() {
+  local mode="${1:?Usage: mock_ssh_for_github direct|alias|none}"
+  local id_github_com id_github
+  case "$mode" in
+    direct) id_github_com="~/.ssh/github";     id_github="~/.ssh/id_rsa" ;;
+    alias)  id_github_com="~/.ssh/id_rsa";     id_github="~/.ssh/svc-github" ;;
+    none)   id_github_com="~/.ssh/id_rsa";     id_github="~/.ssh/id_rsa" ;;
+    *)      printf 'mock_ssh_for_github: unknown mode %s\n' "$mode" >&2; return 1 ;;
+  esac
+  {
+    printf '#!/usr/bin/env bash\n'
+    printf 'if [[ "$1" == "-G" ]]; then\n'
+    printf '  case "$2" in\n'
+    printf '    github.com) printf "identityfile %%s\\n" %q ;;\n' "$id_github_com"
+    printf '    github)     printf "identityfile %%s\\n" %q ;;\n' "$id_github"
+    printf '    *)          printf "identityfile ~/.ssh/id_rsa\\n" ;;\n'
+    printf '  esac\n'
+    printf '  exit 0\n'
+    printf 'fi\n'
+    printf 'exit 0\n'
+  } > "$MOCK_BIN/ssh"
+  chmod +x "$MOCK_BIN/ssh"
+}
+
 # Write a dconf mock that dispatches `dconf read <path>` based on the key path.
 # Each positional argument is a /full/dconf/path=value pair.
 # Pass --capture as first arg to log calls to $BATS_TEST_TMPDIR/dconf.calls.

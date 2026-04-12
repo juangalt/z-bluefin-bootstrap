@@ -7,6 +7,7 @@ setup() {
   isolate_environment
   setup_mock_bin
   load_bootstrap_functions
+  mock_ssh_for_github none
 }
 
 # Helper: mock hostname to return a fixed value
@@ -153,8 +154,15 @@ mock_hostname() {
 
 @test "status: shows ok when ssh config has github.com entry" {
   mock_hostname "test-box"
-  mkdir -p "$HOME/.ssh"
-  printf 'Host github.com\n  IdentityFile ~/.ssh/github\n' > "$HOME/.ssh/config"
+  mock_ssh_for_github direct
+  run cmd_status
+  assert_success
+  assert_output --partial "SSH config has github.com entry"
+}
+
+@test "status: detects github config via Host alias in included file" {
+  mock_hostname "test-box"
+  mock_ssh_for_github alias
   run cmd_status
   assert_success
   assert_output --partial "SSH config has github.com entry"
@@ -164,7 +172,7 @@ mock_hostname() {
   mock_hostname "test-box"
   run cmd_status
   assert_success
-  assert_output --partial "No github.com entry"
+  assert_output --partial "No SSH config found for github.com"
 }
 
 # ── chezmoi drift ──────────────────────────────────────────────────────────
@@ -437,7 +445,7 @@ Run \`brew bundle cleanup --force\` to make these changes."
   mkdir -p "$HOME/.ssh"
   touch "$HOME/.ssh/github"
   chmod 600 "$HOME/.ssh/github"
-  printf 'Host github.com\n  IdentityFile ~/.ssh/github\n' > "$HOME/.ssh/config"
+  mock_ssh_for_github direct
   mock_cmd tailscale 0 "{}"
   mock_jq_dispatch ".BackendState=Running" ".Self.DNSName=ts-node.tailnet-xyz.ts.net." ".CurrentTailnet.Name=user@example.com"
   mock_chezmoi_for_status clean
